@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tichu - Lobby</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<main>
+  <h1>Lobby</h1>
+  <p class="sub" id="greeting">…</p>
+
+  <div class="panel" id="active-panel" hidden>
+    <h3 style="margin-top:0">Dein Tisch</h3>
+    <p class="muted" id="active-status"></p>
+    <div class="seat-grid" id="active-seats"></div>
+  </div>
+
+  <div class="panel">
+    <div class="row">
+      <h3 style="margin:0">Offene Tische</h3>
+      <button id="create-table">Neuen Tisch erstellen</button>
+    </div>
+    <div id="table-list" style="margin-top: 12px;">
+      <p class="muted">Lade…</p>
+    </div>
+  </div>
+
+  <p class="error" id="error" hidden></p>
+</main>
+
+<script type="module">
+  import { ensureSignedIn, getProfile } from './lib/auth.js';
+  import { watchOpenGames, createTable, joinTable, watchGame, watchMySeat, SEAT_LABELS } from './lib/lobby.js';
+
+  const errorEl = document.getElementById('error');
+  function showError(e) {
+    console.error(e);
+    errorEl.textContent = e && e.message ? e.message : String(e);
+    errorEl.hidden = false;
+  }
+
+  const user = await ensureSignedIn().catch((e) => { showError(e); return null; });
+  if (!user) throw new Error('nicht angemeldet');
+
+  const profile = await getProfile(user.uid);
+  if (!profile || !profile.displayName) {
+    window.location.href = 'index.html';
+    throw new Error('kein Profil');
+  }
+  document.getElementById('greeting').textContent = `Angemeldet als ${profile.displayName}.`;
+
+  // Session-Zustand: an welchem Tisch/Sitz nehme ich gerade teil (übersteht Reload).
+  let mine = JSON.parse(localStorage.getItem('tichu.mySeat') || 'null');
+
+  function rememberSeat(gameId, seatIndex) {
+    mine = { gameId, seatIndex };
+    localStorage.setItem('tichu.mySeat', JSON.stringify(mine));
+  }
+
+  const activePanel = document.getElementById('active-panel');
+  const activeStatus = document.getElementById('active-status');
+  const activeSeats = document.getElementById('active-seats');
+
+  let latestGame = null;
+  let latestSeat = null;
+
+  function renderActiveGame() {
+    if (!mine || !latestGame) {
+      activePanel.hidden = true;
+      return;
+    }
+    activePanel.hidden = false;
+    const labels = { waiting: 'Warte auf Mitspieler…', dealt: 'Karten ausgeteilt - Spielansicht folgt.', playing: 'Spiel läuft.', finished: 'Spiel beendet.' };
+    let text = labels[latestGame.status] || latestGame.status;
+    if (latestSeat && latestSeat.hand) text += ` Deine Hand: ${latestSeat.hand.length} Karten.`;
+    activeStatus.textContent = text;
+    activeSeats.innerHTML = '';
+    latestGame.seats.forEach((token, i) => {
+      const chip = document.createElement('div');
+      chip.className = 'seat-chip' + (token ? ' filled' : '') + (i === mine.seatIndex ? ' me' : '');
+      chip.textContent = SEAT_LABELS[i] + (token ? (i === mine.seatIndex ? ' (du)' : ' - belegt') : ' - frei');
+      activeSeats.appendChild(chip);
+    });
+  }
+
+  function attachToTable(gameId, seatIndex) {
+    rememberSeat(gameId, seatIndex);
+    watchGame(gameId, (game) => { latestGame = game; renderActiveGame(); });
+    watchMySeat(gameId, seatIndex, (seat) => { latestSeat = seat; renderActiveGame(); });
+  }
+
+  if (mine) attachToTable(mine.gameId, mine.seatIndex);
+
+  const tableListEl = document.getElementById('table-list');
+  watchOpenGames((games) => {
+    if (games.length === 0) {
+      tableListEl.innerHTML = '<p class="muted">Aktuell keine offenen Tische.</p>';
+      return;
+    }
+    tableListEl.innerHTML = '';
+    for (const game of games) {
+      const openSeats = game.seats.filter((s) => s === null).length;
+      const row = document.createElement('div');
+      row.className = 'table-row';
+      const already = mine && mine.gameId === game.id;
+      row.innerHTML = `
+        <span>Tisch ${game.id.slice(0, 6)} <span class="muted">(${4 - openSeats}/4, Ziel ${game.target})</span></span>
+      `;
+      const btn = document.createElement('button');
+      btn.textContent = already ? 'Beigetreten' : 'Beitreten';
+      btn.disabled = already;
+      btn.className = 'secondary';
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        try {
+          const { seatIndex } = await joinTable(game.id, user.uid);
+          attachToTable(game.id, seatIndex);
+        } catch (e) {
+          showError(e);
+          btn.disabled = false;
+        }
+      });
+      row.appendChild(btn);
+      tableListEl.appendChild(row);
+    }
+  });
+
+  document.getElementById('create-table').addEventListener('click', async () => {
+    try {
+      const gameId = await createTable(1000);
+      const { seatIndex } = await joinTable(gameId, user.uid);
+      attachToTable(gameId, seatIndex);
+    } catch (e) {
+      showError(e);
+    }
+  });
+</script>
+</body>
+</html>

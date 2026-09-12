@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tichu</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<main>
+  <h1>Tichu-Turnier</h1>
+  <p class="sub">Melde dich an, um mitzuspielen.</p>
+
+  <div class="panel" id="status-panel">
+    <p class="muted" id="status">Verbinde mit Firebase…</p>
+  </div>
+
+  <div class="panel" id="name-panel" hidden>
+    <label for="name">Dein Anzeigename</label>
+    <p class="muted">Nur für deine eigene Turniertabelle sichtbar - deine Mitspieler sehen ihn während eines laufenden Spiels nicht.</p>
+    <input type="text" id="name" maxlength="40" placeholder="z. B. Alex" />
+    <div class="row" style="margin-top: 12px;">
+      <button id="save-name">Weiter zur Lobby</button>
+    </div>
+    <p class="error" id="name-error" hidden></p>
+  </div>
+</main>
+
+<script type="module">
+  import { ensureSignedIn, getProfile, setDisplayName } from './lib/auth.js';
+
+  const statusEl = document.getElementById('status');
+  const namePanel = document.getElementById('name-panel');
+  const nameInput = document.getElementById('name');
+  const nameError = document.getElementById('name-error');
+
+  try {
+    const user = await ensureSignedIn();
+    statusEl.textContent = 'Angemeldet.';
+    const profile = await getProfile(user.uid);
+    if (profile && profile.displayName) {
+      window.location.href = 'lobby.html';
+    } else {
+      document.getElementById('status-panel').hidden = true;
+      namePanel.hidden = false;
+    }
+  } catch (e) {
+    console.error(e);
+    statusEl.textContent = 'Anmeldung fehlgeschlagen: ' + describeError(e);
+  }
+
+  document.getElementById('save-name').addEventListener('click', async () => {
+    const name = nameInput.value.trim();
+    if (!name) {
+      nameError.textContent = 'Bitte einen Namen eingeben.';
+      nameError.hidden = false;
+      return;
+    }
+    try {
+      const user = await ensureSignedIn();
+      await setDisplayName(user.uid, name);
+      window.location.href = 'lobby.html';
+    } catch (e) {
+      console.error(e);
+      nameError.textContent = 'Konnte Namen nicht speichern: ' + describeError(e);
+      nameError.hidden = false;
+    }
+  });
+
+  function describeError(e) {
+    const code = e && e.code;
+    if (code === 'auth/configuration-not-found' || code === 'auth/admin-restricted-operation') {
+      return 'Anonyme Anmeldung ist in der Firebase-Konsole noch nicht aktiviert.';
+    }
+    if (code === 'permission-denied') {
+      return 'Firestore-Regeln blockieren diesen Zugriff.';
+    }
+    return e && e.message ? e.message : String(e);
+  }
+</script>
+</body>
+</html>

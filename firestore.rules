@@ -1,0 +1,70 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // Hat `request.auth.uid` irgendeinen der vier Sitzplätze dieses Tisches beansprucht?
+    // (Ohne diese Prüfung könnte jeder beliebige angemeldete Nutzer fremde Tische verändern.)
+    function isParticipant(gameId) {
+      return
+        (exists(/databases/$(database)/documents/games/$(gameId)/private/seat0)
+          && get(/databases/$(database)/documents/games/$(gameId)/private/seat0).data.claimedByUid == request.auth.uid)
+        || (exists(/databases/$(database)/documents/games/$(gameId)/private/seat1)
+          && get(/databases/$(database)/documents/games/$(gameId)/private/seat1).data.claimedByUid == request.auth.uid)
+        || (exists(/databases/$(database)/documents/games/$(gameId)/private/seat2)
+          && get(/databases/$(database)/documents/games/$(gameId)/private/seat2).data.claimedByUid == request.auth.uid)
+        || (exists(/databases/$(database)/documents/games/$(gameId)/private/seat3)
+          && get(/databases/$(database)/documents/games/$(gameId)/private/seat3).data.claimedByUid == request.auth.uid);
+    }
+
+    // Eigenes Profil (Anzeigename etc.) - ausschließlich für den Besitzer sichtbar.
+    // Innerhalb eines laufenden Spiels wird dieser Name NICHT angezeigt (siehe games/*).
+    match /users/{uid} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
+    }
+
+    match /games/{gameId} {
+      // Öffentlicher Spielstand (Sitz-Tokens, Stiche, Punkte, wer am Zug ist) - enthält
+      // absichtlich keine uids/Anzeigenamen, ist also für alle angemeldeten Nutzer unbedenklich.
+      allow read: if signedIn();
+      allow create: if signedIn();
+      // Update nur durch tatsächliche Teilnehmer dieses Tisches (verhindert, dass fremde
+      // Nutzer Punkte/Zustand anderer Tische verändern). Prüft NICHT die inhaltliche
+      // Spielregel-Korrektheit jedes Zugs - das bräuchte eine serverseitige Instanz
+      // (Cloud Function), die dieses Projekt bewusst (noch) nicht hat.
+      allow update: if signedIn() && isParticipant(gameId);
+      allow delete: if false;
+
+      // Die Hand jedes Sitzes: nur die uid, die den Sitz beansprucht hat, darf sie lesen.
+      match /private/{seatDoc} {
+        allow read: if signedIn() && resource.data.claimedByUid == request.auth.uid;
+
+        // Sitz beanspruchen: nur als sich selbst, nur mit leerer Starthand.
+        allow create: if signedIn()
+          && request.resource.data.claimedByUid == request.auth.uid
+          && request.resource.data.hand.size() == 0;
+
+        allow update: if signedIn() && (
+          // eigene Hand fortlaufend aktualisieren (z. B. beim Ausspielen von Karten)
+          resource.data.claimedByUid == request.auth.uid
+          ||
+          // einmaliges Austeilen durch den Mitspieler, der den vierten Sitz füllt: darf nur
+          // das `hand`-Feld setzen, und nur solange die Hand noch leer (also nicht ausgeteilt) ist.
+          (isParticipant(gameId)
+            && resource.data.hand.size() == 0
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hand']))
+        );
+      }
+
+      // Ereignis-Log der gespielten Züge (einmal gespielte Karten sind ohnehin öffentlich).
+      match /events/{eventId} {
+        allow read: if signedIn();
+        allow create: if signedIn() && isParticipant(gameId);
+        allow update, delete: if false;
+      }
+    }
+  }
+}
