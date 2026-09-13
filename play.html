@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tichu - Testtisch</title>
+<link rel="stylesheet" href="style.css" />
+<style>
+  body { padding: 20px 14px 60px; }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  h1 { font-size: 1.3rem; margin: 0 0 2px; }
+  .topbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
+  .topbar .actions { display: flex; gap: 8px; }
+  .error-banner { background: #3a1418; border: 1px solid #6b2229; color: #ff9aa2; padding: 10px 14px; border-radius: 8px; margin-bottom: 14px; font-size: 0.9rem; }
+
+  .seats { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-bottom: 16px; }
+  .seat-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+  .seat-panel.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .seat-panel .head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+  .seat-panel .name { font-weight: 700; font-size: 0.95rem; }
+  .seat-panel .meta { font-size: 0.78rem; color: var(--muted); }
+  .flair { display: inline-block; font-size: 0.7rem; padding: 1px 6px; border-radius: 999px; margin-left: 6px; }
+  .flair.gt { background: #7c3aed33; color: #c4b5fd; }
+  .flair.t { background: #d9770633; color: #fdba74; }
+  .flair.place { background: #16a34a33; color: #86efac; }
+  .seat-tichu-btn { font-size: 0.72rem; padding: 4px 8px; margin-top: 6px; background: transparent; border: 1px solid var(--border); color: var(--text); border-radius: 6px; }
+
+  .cards-row { display: flex; flex-wrap: wrap; gap: 6px; }
+
+  .pcard { width: 52px; height: 74px; border-radius: 7px; background: #f4efe2; border: 1px solid #d9d0ba; position: relative; box-shadow: 0 2px 6px rgba(0,0,0,0.35); cursor: default; flex-shrink: 0; }
+  .pcard.small { width: 40px; height: 56px; }
+  .pcard.clickable { cursor: pointer; }
+  .pcard.selected { box-shadow: 0 0 0 3px var(--accent), 0 4px 10px rgba(0,0,0,0.4); transform: translateY(-4px); }
+  .pcard.assigned { box-shadow: 0 0 0 3px var(--assign-color, var(--accent)); }
+  .pcard.special { background: #e8c471; border-color: #b8862f; }
+  .pcard .corner { position: absolute; font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 700; font-size: 12px; line-height: 1; }
+  .pcard.small .corner { font-size: 9px; }
+  .pcard .corner.tl { top: 4px; left: 5px; }
+  .pcard .corner.br { bottom: 4px; right: 5px; transform: rotate(180deg); }
+  .pcard .icon { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); }
+
+  .table-area { background: radial-gradient(closest-side, #1c3c34, #101a1c 78%); border-radius: 20px; padding: 24px; margin-bottom: 16px; min-height: 140px; }
+  .trick-label { font-size: 0.85rem; color: var(--muted); margin-bottom: 10px; text-align: center; }
+  .trick-cards { display: flex; justify-content: center; gap: 6px; flex-wrap: wrap; }
+
+  .hand-zone { margin-bottom: 12px; }
+  .hand-zone .label { font-size: 0.85rem; color: var(--muted); margin-bottom: 6px; }
+
+  .actionbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
+  .actionbar .spacer { flex: 1; }
+  .wish-chip { font-size: 0.8rem; background: #0f1319; border: 1px solid var(--border); border-radius: 999px; padding: 5px 12px; }
+
+  .schupfen-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+  .schupfen-tabs button { font-size: 0.82rem; padding: 6px 12px; }
+  .schupfen-tabs button.active { background: var(--accent); }
+  .schupfen-tabs button:not(.active) { background: transparent; border: 1px solid var(--border); color: var(--text); }
+  .targets { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+  .target-slot { background: var(--panel); border: 2px solid var(--border); border-radius: 10px; padding: 8px 10px; min-width: 100px; text-align: center; cursor: pointer; }
+  .target-slot .t-label { font-size: 0.78rem; color: var(--muted); margin-bottom: 6px; }
+  .target-slot .t-card { min-height: 74px; display: flex; align-items: center; justify-content: center; }
+
+  .result-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+  .result-team { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+  .result-team h3 { margin: 0 0 8px; font-size: 1rem; }
+  .result-team .row { padding: 4px 0; font-size: 0.88rem; }
+  .result-team .total { font-size: 1.4rem; font-weight: 700; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <div>
+      <h1>Tichu - Testtisch</h1>
+      <p class="sub" style="margin:0">Hotseat-Modus: du steuerst alle vier Sitze, um das Regelwerk zu prüfen.</p>
+    </div>
+    <div class="actions">
+      <button id="btn-new-round" class="secondary">Neue Runde</button>
+      <button id="btn-new-match" class="secondary">Neues Match</button>
+    </div>
+  </div>
+  <div id="error"></div>
+  <div id="app"></div>
+</div>
+
+<script type="module">
+import { Round, Match, teamOf } from './engine/game.js';
+import { classify, canBeat, COMBO } from './engine/combos.js';
+import { sortHand, cardPoints } from './engine/cards.js';
+
+const SEAT_LABELS = ['Nord', 'Ost', 'Süd', 'West'];
+const RANK_LABEL = { 11: 'B', 12: 'D', 13: 'K', 14: 'A' };
+
+const SUIT_ICON = {
+  Jade:   { color: '#2E6B4A', fill: '#3E8F63', path: 'M16 3 L25 13 L16 29 L7 13 Z' },
+  Schwert:{ color: '#151A21', fill: '#232B36', path: 'M15 2 L17 2 L17 17 L20 17 L20 19 L12 19 L12 17 L15 17 Z M12 21 L20 21 L20 23 L18 23 L18 28 L14 28 L14 23 L12 23 Z' },
+  Pagode: { color: '#25407A', fill: '#3F6FC4', path: 'M16 3 L21 9 L11 9 Z M9 11 L23 11 L19 17 L13 17 Z M11 19 L21 19 L21 28 L11 28 Z' },
+  Stern:  { color: '#8F2E26', fill: '#D94A3E', path: 'M16 2 L18.5 10.5 L27 8 L20.5 14.5 L27 21 L18.5 18.5 L16 27 L13.5 18.5 L5 21 L11.5 14.5 L5 8 L13.5 10.5 Z' },
+};
+const AMBER = '#8A5A16';
+const SPECIAL_ICON = {
+  MAHJONG: { path: 'M11 4 L21 4 L21 7 L18 7 L18 25 L21 25 L21 28 L11 28 L11 25 L14 25 L14 7 L11 7 Z', label: 'I' },
+  PHOENIX: { path: 'M16 29c-4.4 0-8-3.6-8-8 0-5 3.6-9.7 8-16.6 1.3 3.7 0.4 6.6 2.4 8.2C21.3 9.3 22.6 6 22 2c3 4.9 4 11.3 1.3 16.6-1.3 5-3.6 8.6-6.7 8.6z', label: 'PH' },
+  DOG:     { path: 'M12 11a2.6 2.6 0 1 0 0.01 0z M20 11a2.6 2.6 0 1 0 0.01 0z M8.5 16a2.3 2.3 0 1 0 0.01 0z M23.5 16a2.3 2.3 0 1 0 0.01 0z M16 18a4.6 4.6 0 1 0 0.01 0z', label: 'HU' },
+  DRAGON:  { path: 'M6 27c-1-6 2-10 7-11-2-2-2-5 0-7 3 2 3 5 1 7 5-1 8 2 8 6-3 0-5-2-6-4-1 3-4 5-8 6-1 0-2 2-2 3z M20 9c1-1.5 3-2 5-1-1 1.5-3 2-5 1z', label: 'DR' },
+};
+
+function labelFor(card) {
+  if (card.special) return SPECIAL_ICON[card.special].label;
+  return RANK_LABEL[card.rank] || String(card.rank);
+}
+
+function cardEl(card, { selected = false, assignColor = null, small = false, onClick = null } = {}) {
+  const div = document.createElement('div');
+  div.className = 'pcard' + (card.special ? ' special' : '') + (small ? ' small' : '') + (selected ? ' selected' : '') + (assignColor ? ' assigned' : '') + (onClick ? ' clickable' : '');
+  if (assignColor) div.style.setProperty('--assign-color', assignColor);
+  const label = labelFor(card);
+  const icon = card.special ? SPECIAL_ICON[card.special] : SUIT_ICON[card.suit];
+  const color = card.special ? AMBER : icon.color;
+  const fill = card.special ? AMBER : icon.fill;
+  div.innerHTML = `
+    <div class="corner tl" style="color:${color}">${label}</div>
+    <svg class="icon" viewBox="0 0 32 32" width="26" height="26"><path d="${icon.path}" fill="${fill}" stroke="${color}" stroke-width="0.6"/></svg>
+    <div class="corner br" style="color:${color}">${label}</div>
+  `;
+  if (onClick) div.addEventListener('click', onClick);
+  return div;
+}
+
+// --- Zustand -----------------------------------------------------------
+let match = new Match({});
+let round = null;
+let selected = new Set();
+let grandTichuChoices = [false, false, false, false];
+let schupfenTab = 0;
+let schupfenPending = null; // {seat, cardId}
+let schupfenDraft = null; // [{targetSeat: card}, ...]
+let errorMsg = '';
+
+const TARGET_COLORS = ['#4fa3ff', '#34d399', '#f59e0b'];
+
+function newRound() {
+  round = match.newRound();
+  selected = new Set();
+  grandTichuChoices = [false, false, false, false];
+  schupfenTab = 0;
+  schupfenPending = null;
+  schupfenDraft = [{}, {}, {}, {}];
+  errorMsg = '';
+  render();
+}
+function newMatch() {
+  match = new Match({});
+  newRound();
+}
+document.getElementById('btn-new-round').addEventListener('click', newRound);
+document.getElementById('btn-new-match').addEventListener('click', newMatch);
+
+function phase() {
+  if (!round) return 'idle';
+  if (round.over) return 'roundover';
+  if (!round.dealt14) return 'grandtichu';
+  if (!round.schupfenDone) return 'schupfen';
+  return 'playing';
+}
+
+function withError(fn) {
+  try {
+    fn();
+    errorMsg = '';
+  } catch (e) {
+    errorMsg = e.message || String(e);
+  }
+  render();
+}
+
+// --- Renderer ------------------------------------------------------------
+function render() {
+  const errEl = document.getElementById('error');
+  errEl.innerHTML = errorMsg ? `<div class="error-banner">${errorMsg}</div>` : '';
+
+  const app = document.getElementById('app');
+  app.innerHTML = '';
+  const p = phase();
+  if (p === 'idle') app.appendChild(renderIdle());
+  else if (p === 'grandtichu') app.appendChild(renderGrandTichu());
+  else if (p === 'schupfen') app.appendChild(renderSchupfen());
+  else if (p === 'playing') app.appendChild(renderPlaying());
+  else if (p === 'roundover') app.appendChild(renderRoundOver());
+}
+
+function renderIdle() {
+  const div = document.createElement('div');
+  div.className = 'panel';
+  div.innerHTML = `<p>Noch keine Runde gestartet.</p>`;
+  const btn = document.createElement('button');
+  btn.textContent = 'Runde starten';
+  btn.addEventListener('click', newRound);
+  div.appendChild(btn);
+  return div;
+}
+
+function renderGrandTichu() {
+  const wrap = document.createElement('div');
+  const seats = document.createElement('div');
+  seats.className = 'seats';
+  for (let i = 0; i < 4; i++) {
+    const panel = document.createElement('div');
+    panel.className = 'seat-panel';
+    panel.innerHTML = `<div class="head"><span class="name">${SEAT_LABELS[i]}</span></div>`;
+    const row = document.createElement('div');
+    row.className = 'cards-row';
+    for (const c of round.first8[i]) row.appendChild(cardEl(c, { small: true }));
+    panel.appendChild(row);
+    const btn = document.createElement('button');
+    btn.className = 'secondary';
+    btn.style.marginTop = '8px';
+    btn.style.fontSize = '0.8rem';
+    btn.textContent = grandTichuChoices[i] ? 'Großes Tichu ✓' : 'Kein Großes Tichu';
+    btn.addEventListener('click', () => { grandTichuChoices[i] = !grandTichuChoices[i]; render(); });
+    panel.appendChild(btn);
+    seats.appendChild(panel);
+  }
+  wrap.appendChild(seats);
+  const cont = document.createElement('button');
+  cont.textContent = 'Weiter: restliche 6 Karten austeilen';
+  cont.addEventListener('click', () => withError(() => {
+    for (let i = 0; i < 4; i++) round.callGrandTichu(i, grandTichuChoices[i]);
+    round.dealRest();
+  }));
+  wrap.appendChild(cont);
+  return wrap;
+}
+
+function renderSchupfen() {
+  const wrap = document.createElement('div');
+  const tabs = document.createElement('div');
+  tabs.className = 'schupfen-tabs';
+  for (let i = 0; i < 4; i++) {
+    const n = Object.keys(schupfenDraft[i]).length;
+    const btn = document.createElement('button');
+    btn.className = i === schupfenTab ? 'active' : '';
+    btn.textContent = `${SEAT_LABELS[i]} (${n}/3)`;
+    btn.addEventListener('click', () => { schupfenTab = i; schupfenPending = null; render(); });
+    tabs.appendChild(btn);
+  }
+  wrap.appendChild(tabs);
+
+  const seat = schupfenTab;
+  const others = [0, 1, 2, 3].filter((s) => s !== seat);
+  const draft = schupfenDraft[seat];
+  const assignedIds = new Set(Object.values(draft).map((c) => c.id));
+
+  const hint = document.createElement('p');
+  hint.className = 'sub';
+  hint.style.margin = '0 0 10px';
+  hint.textContent = 'Karte antippen, dann Ziel antippen. Nochmal auf ein belegtes Ziel tippen entfernt die Zuordnung.';
+  wrap.appendChild(hint);
+
+  const targets = document.createElement('div');
+  targets.className = 'targets';
+  others.forEach((targetSeat, idx) => {
+    const slot = document.createElement('div');
+    slot.className = 'target-slot';
+    slot.style.borderColor = TARGET_COLORS[idx];
+    slot.innerHTML = `<div class="t-label">an ${SEAT_LABELS[targetSeat]}</div>`;
+    const cardHolder = document.createElement('div');
+    cardHolder.className = 't-card';
+    if (draft[targetSeat]) {
+      cardHolder.appendChild(cardEl(draft[targetSeat], { assignColor: TARGET_COLORS[idx] }));
+    } else {
+      cardHolder.innerHTML = '<span class="muted" style="font-size:0.75rem">leer</span>';
+    }
+    slot.appendChild(cardHolder);
+    slot.addEventListener('click', () => {
+      if (schupfenPending && schupfenPending.seat === seat) {
+        const card = round.hands[seat].find((c) => c.id === schupfenPending.cardId);
+        if (card) {
+          for (const k of Object.keys(draft)) if (draft[k].id === card.id) delete draft[k];
+          draft[targetSeat] = card;
+        }
+        schupfenPending = null;
+      } else if (draft[targetSeat]) {
+        delete draft[targetSeat];
+      }
+      render();
+    });
+    targets.appendChild(slot);
+  });
+  wrap.appendChild(targets);
+
+  const handLabel = document.createElement('div');
+  handLabel.className = 'sub';
+  handLabel.style.margin = '0 0 6px';
+  handLabel.textContent = `Hand von ${SEAT_LABELS[seat]}:`;
+  wrap.appendChild(handLabel);
+
+  const row = document.createElement('div');
+  row.className = 'cards-row';
+  for (const c of sortHand(round.hands[seat])) {
+    const isPending = schupfenPending && schupfenPending.seat === seat && schupfenPending.cardId === c.id;
+    const assignedTargetIdx = others.findIndex((t) => draft[t] && draft[t].id === c.id);
+    row.appendChild(cardEl(c, {
+      selected: isPending,
+      assignColor: assignedTargetIdx >= 0 ? TARGET_COLORS[assignedTargetIdx] : null,
+      onClick: () => {
+        if (assignedIds.has(c.id)) return; // erst am Ziel wieder freigeben
+        schupfenPending = isPending ? null : { seat, cardId: c.id };
+        render();
+      },
+    }));
+  }
+  wrap.appendChild(row);
+
+  const allReady = schupfenDraft.every((d) => Object.keys(d).length === 3);
+  const submit = document.createElement('button');
+  submit.style.marginTop = '16px';
+  submit.textContent = 'Schupfen ausführen';
+  submit.disabled = !allReady;
+  submit.addEventListener('click', () => withError(() => round.schupfen(schupfenDraft)));
+  wrap.appendChild(submit);
+  return wrap;
+}
+
+function comboLabel(combo) {
+  if (!combo) return '';
+  const names = {
+    SINGLE: 'Einzel', PAIR: 'Paar', TRIPLE: 'Drilling', FULLHOUSE: 'Full House',
+    STAIRS: 'Treppe', STRAIGHT: 'Straße', BOMB_QUAD: 'Vierling-Bombe', BOMB_STRAIGHTFLUSH: 'Straßenbombe', DOG: 'Hund',
+  };
+  return names[combo.type] || combo.type;
+}
+
+function renderPlaying() {
+  const wrap = document.createElement('div');
+
+  if (round.pendingDragonGiveaway) {
+    const overlay = document.createElement('div');
+    overlay.className = 'panel';
+    overlay.style.borderColor = '#d97706';
+    const winner = round.pendingDragonGiveaway.winnerIdx;
+    const opponents = [0, 1, 2, 3].filter((s) => teamOf(s) !== teamOf(winner));
+    overlay.innerHTML = `<p><b>Drache gewonnen von ${SEAT_LABELS[winner]}.</b> An welchen Gegner geht der Stich?</p>`;
+    const row = document.createElement('div');
+    row.className = 'row';
+    for (const s of opponents) {
+      const btn = document.createElement('button');
+      btn.textContent = SEAT_LABELS[s];
+      btn.addEventListener('click', () => withError(() => round.giveDragonTrick(s)));
+      row.appendChild(btn);
+    }
+    overlay.appendChild(row);
+    wrap.appendChild(overlay);
+  }
+
+  const seats = document.createElement('div');
+  seats.className = 'seats';
+  for (let i = 0; i < 4; i++) {
+    const panel = document.createElement('div');
+    panel.className = 'seat-panel' + (i === round.turn ? ' active' : '');
+    const place = round.finishOrder.indexOf(i);
+    panel.innerHTML = `
+      <div class="head">
+        <span class="name">${SEAT_LABELS[i]}${i === round.turn ? ' 🎯' : ''}</span>
+        <span class="meta">${round.hands[i].length} Karten</span>
+      </div>
+      <div>
+        ${round.grandTichu[i] ? '<span class="flair gt">Großes Tichu</span>' : ''}
+        ${!round.grandTichu[i] && round.tichu[i] ? '<span class="flair t">Tichu</span>' : ''}
+        ${place >= 0 ? `<span class="flair place">Platz ${place + 1}</span>` : ''}
+      </div>
+    `;
+    if (round.playedAny && !round.playedAny[i] && !round.grandTichu[i] && !round.tichu[i] && round.active.has(i)) {
+      const tbtn = document.createElement('button');
+      tbtn.className = 'seat-tichu-btn';
+      tbtn.textContent = 'Tichu ansagen';
+      tbtn.addEventListener('click', () => withError(() => round.callTichu(i)));
+      panel.appendChild(tbtn);
+    }
+    seats.appendChild(panel);
+  }
+  wrap.appendChild(seats);
+
+  const table = document.createElement('div');
+  table.className = 'table-area';
+  const label = document.createElement('div');
+  label.className = 'trick-label';
+  if (round.currentTrick.combo === null) {
+    label.textContent = `${SEAT_LABELS[round.turn]} eröffnet den Stich`;
+  } else {
+    label.textContent = `Zuletzt: ${SEAT_LABELS[round.currentTrick.winnerIdx]} spielt ${comboLabel(round.currentTrick.combo)}`;
+  }
+  table.appendChild(label);
+  const trickCards = document.createElement('div');
+  trickCards.className = 'trick-cards';
+  for (const c of round.currentTrick.cardsInTrick) trickCards.appendChild(cardEl(c, { small: true }));
+  table.appendChild(trickCards);
+  wrap.appendChild(table);
+
+  const handZone = document.createElement('div');
+  handZone.className = 'hand-zone';
+  const handLabel = document.createElement('div');
+  handLabel.className = 'label';
+  handLabel.textContent = `Hand von ${SEAT_LABELS[round.turn]} (am Zug):`;
+  handZone.appendChild(handLabel);
+  const row = document.createElement('div');
+  row.className = 'cards-row';
+  for (const c of sortHand(round.hands[round.turn])) {
+    row.appendChild(cardEl(c, {
+      selected: selected.has(c.id),
+      onClick: () => { selected.has(c.id) ? selected.delete(c.id) : selected.add(c.id); render(); },
+    }));
+  }
+  handZone.appendChild(row);
+  wrap.appendChild(handZone);
+
+  const bar = document.createElement('div');
+  bar.className = 'actionbar';
+  if (round.pendingWish != null) {
+    const chip = document.createElement('span');
+    chip.className = 'wish-chip';
+    chip.textContent = `Wunsch: ${round.pendingWish}`;
+    bar.appendChild(chip);
+  }
+  const spacer = document.createElement('div');
+  spacer.className = 'spacer';
+  bar.appendChild(spacer);
+
+  const passBtn = document.createElement('button');
+  passBtn.className = 'secondary';
+  passBtn.textContent = 'Passen';
+  passBtn.disabled = round.currentTrick.combo === null || !!round.pendingDragonGiveaway;
+  passBtn.addEventListener('click', () => withError(() => round.pass(round.turn)));
+  bar.appendChild(passBtn);
+
+  const playBtn = document.createElement('button');
+  playBtn.textContent = 'Karten spielen';
+  playBtn.disabled = selected.size === 0 || !!round.pendingDragonGiveaway;
+  playBtn.addEventListener('click', () => withError(() => {
+    const cards = round.hands[round.turn].filter((c) => selected.has(c.id));
+    let opts = {};
+    const isMahjongLead = cards.length === 1 && cards[0].special === 'MAHJONG' && round.currentTrick.combo === null;
+    if (isMahjongLead) {
+      const input = window.prompt('Wunsch ansagen (2-14), leer lassen für keinen Wunsch:');
+      if (input && input.trim() !== '') {
+        const n = Number(input);
+        if (!Number.isNaN(n)) opts.wish = n;
+      }
+    }
+    round.play(round.turn, cards, opts);
+    selected = new Set();
+  }));
+  bar.appendChild(playBtn);
+  wrap.appendChild(bar);
+
+  return wrap;
+}
+
+function renderRoundOver() {
+  if (!round.uiRecorded) {
+    match.recordRound(round);
+    round.uiRecorded = true;
+  }
+  const wrap = document.createElement('div');
+  const r = round.result;
+  const heading = document.createElement('h2');
+  heading.textContent = r.doubleWin ? 'Doppelsieg!' : 'Rundenende';
+  wrap.appendChild(heading);
+
+  // Restkarten des Schlussspielers gehen als Team-Bonus an die Gegner, ohne
+  // einem einzelnen Spieler gutgeschrieben zu werden - separat ausweisen,
+  // sonst wirkt die Summe der Einzelwerte gegenüber dem Team-Total falsch.
+  let lastPlaceSeat = null;
+  let lastPlaceHandPoints = 0;
+  if (!r.doubleWin) {
+    lastPlaceSeat = [...round.active][0];
+    lastPlaceHandPoints = round.hands[lastPlaceSeat].reduce((sum, c) => sum + cardPoints(c), 0);
+  }
+
+  const grid = document.createElement('div');
+  grid.className = 'result-grid';
+  const teamNames = ['Süd - Nord', 'West - Ost'];
+  const teamSeats = [[2, 0], [3, 1]];
+  for (let t = 0; t < 2; t++) {
+    const box = document.createElement('div');
+    box.className = 'result-team';
+    let rows = '';
+    for (const s of teamSeats[t]) {
+      rows += `<div class="row">${SEAT_LABELS[s]}: ${r.pointsPerPlayer[s]} Punkte${r.tichuBonus[s] ? ` (${r.tichuBonus[s] > 0 ? '+' : ''}${r.tichuBonus[s]} Tichu)` : ''}</div>`;
+    }
+    if (lastPlaceSeat != null && !teamSeats[t].includes(lastPlaceSeat) && lastPlaceHandPoints !== 0) {
+      rows += `<div class="row">Restkarten von ${SEAT_LABELS[lastPlaceSeat]}: ${lastPlaceHandPoints} Punkte</div>`;
+    }
+    box.innerHTML = `<h3>Team ${teamNames[t]}</h3>${rows}<div class="total">${r.teamScore[t]} Punkte</div>`;
+    grid.appendChild(box);
+  }
+  wrap.appendChild(grid);
+
+  const matchP = document.createElement('p');
+  matchP.innerHTML = `Gesamtstand Match: <b>${match.totalScore[0]}</b> (Süd-Nord) : <b>${match.totalScore[1]}</b> (West-Ost) · Ziel ${match.target}`;
+  wrap.appendChild(matchP);
+
+  if (match.isMatchOver()) {
+    const w = match.winner();
+    const p = document.createElement('p');
+    p.innerHTML = `<b>Match beendet</b> - ${w == null ? 'Unentschieden' : 'Team ' + teamNames[w] + ' gewinnt!'}`;
+    wrap.appendChild(p);
+  }
+
+  const btn = document.createElement('button');
+  btn.textContent = 'Nächste Runde';
+  btn.addEventListener('click', newRound);
+  wrap.appendChild(btn);
+
+  return wrap;
+}
+
+render();
+</script>
+</body>
+</html>
