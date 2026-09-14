@@ -55,10 +55,12 @@ service cloud.firestore {
       match /private/{seatDoc} {
         allow read: if signedIn() && resource.data.claimedByUid == request.auth.uid;
 
-        // Sitz beanspruchen: nur als sich selbst, nur mit leerer Starthand.
+        // Sitz beanspruchen: nur als sich selbst, mit leerer Starthand (Plätze 1-3) oder direkt
+        // mit der vollen Hand (der vierte Spieler mischt und legt seine eigene Hand im selben
+        // Zug an, siehe joinTable() in lobby.js).
         allow create: if signedIn()
           && request.resource.data.claimedByUid == request.auth.uid
-          && request.resource.data.hand.size() == 0;
+          && (request.resource.data.hand.size() == 0 || request.resource.data.hand.size() == 14);
 
         allow update: if signedIn() && (
           // eigene Hand fortlaufend aktualisieren (z. B. beim Ausspielen von Karten)
