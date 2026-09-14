@@ -4,9 +4,15 @@ Online-Tichu-Turnierplattform für 4 Spieler. Anmeldung, Lobby mit laufenden Spi
 anonymisierte Gegner (kein Cheating durch Kennen der Mitspieler) und vollständiges
 Regelwerk (Schupfen, große/kleine Tichu-Ansage, Bomben, Drache/Phönix/Hund/Mahjong).
 
-Statische Seite (GitHub Pages, kein eigener Server) + Firebase (Firestore + Anonymous
-Auth) als reine Sync-Schicht. Firebase-Projekt: `tichu-1c42b` – neu angelegt, nie
-öffentlich exponiert (bewusst nicht das alte Schachturnier-Projekt).
+Statische Seite (GitHub Pages, kein eigener Server) + Firebase (Firestore + Auth per
+E-Mail/Passwort) als reine Sync-Schicht. Firebase-Projekt: `tichu-1c42b` – neu angelegt,
+nie öffentlich exponiert (bewusst nicht das alte Schachturnier-Projekt).
+
+**Login/Orga-Rolle:** Anmeldung per frei gewähltem Benutzernamen + Passwort (Account wird
+beim ersten Login automatisch angelegt). Der Benutzername "Panda" (fixes Passwort) ist der
+Turnier-Orga-Account – nur er darf neue Tische erstellen und Spieler aus einem Tisch kicken.
+Das wird serverseitig über `firestore.rules` (`isOrganizer()`, prüft die E-Mail im
+Auth-Token) durchgesetzt, nicht nur in der UI versteckt.
 
 ## Stand
 
@@ -23,9 +29,12 @@ Auth) als reine Sync-Schicht. Firebase-Projekt: `tichu-1c42b` – neu angelegt, 
 **Neu, noch nicht Ende-zu-Ende getestet** – Firebase-Anbindung:
 
 - `lib/firebase-config.js` – Projektkonfiguration.
-- `lib/auth.js` – anonyme Anmeldung, eigenes Profil (`users/{uid}.displayName`).
-- `lib/lobby.js` – Tisch erstellen/beitreten, Kartengabe sobald der vierte Sitz belegt ist.
-- `index.html` – Login/Namenseingabe. `lobby.html` – offene Tische, eigener Tisch/Sitze.
+- `lib/auth.js` – Login per Benutzername+Passwort (E-Mail/Passwort-Auth intern, Account wird
+  beim ersten Login angelegt), eigenes Profil (`users/{uid}.displayName`), `isOrganizer()`.
+- `lib/lobby.js` – Tisch erstellen/beitreten, Kartengabe sobald der vierte Sitz belegt ist,
+  `kickSeat()` (nur Orga) entfernt einen Spieler wieder aus einem Tisch.
+- `index.html` – Login (Benutzername+Passwort). `lobby.html` – offene Tische, eigener
+  Tisch/Sitze, für die Orga zusätzlich eine Admin-Ansicht aller Tische mit Kick-Buttons.
 - `firestore.rules` – Sicherheitsregeln (siehe unten).
 - `.github/workflows/static.yml` – Deploy auf GitHub Pages bei Push auf `main`.
 
@@ -34,17 +43,15 @@ Tichu-Ansage-Buttons) und die Turnierstruktur über mehrere Tische/Runden hinweg
 
 ## Damit es läuft: zwei Schritte in der Firebase-Konsole
 
-Geprüft per REST-Aufruf – aktuell fehlt beides noch:
-
 1. **Firestore aktivieren**: [Firebase-Konsole](https://console.firebase.google.com/project/tichu-1c42b/firestore)
    → „Datenbank erstellen" → **Produktionsmodus** (nicht Testmodus – die Regeln unten
    übernehmen die Absicherung).
-2. **Anonyme Anmeldung aktivieren**: Konsole → Authentication → Sign-in method →
-   „Anonymous" aktivieren.
+2. **E-Mail/Passwort-Anmeldung aktivieren**: Konsole → Authentication → Sign-in method →
+   „Email/Password" aktivieren (die alte „Anonymous"-Methode wird nicht mehr gebraucht).
 3. **Sicherheitsregeln einspielen**: Firestore → Rules → Inhalt von `firestore.rules`
    hier im Repo einfügen und veröffentlichen.
 
-Ohne CLI-/Admin-Zugriff auf dieses Projekt kann ich diese drei Schritte nicht selbst
+Ohne CLI-/Admin-Zugriff auf dieses Projekt kann ich diese Schritte nicht selbst
 ausführen – das geht nur über die Konsole mit deinem Google-Account.
 
 ## Sicherheits-/Anonymitätsmodell
@@ -69,6 +76,11 @@ ausführen – das geht nur über die Konsole mit deinem Google-Account.
   genug" ausweisen, um seinen eigenen Beitritt freizugeben (führte zuvor zu einem
   Join-Fehler). Das Beitreten selbst ist weiterhin strikt "nur leere Sitze füllen,
   nie überschreiben" (`seatsOnlyGrow` in den Regeln).
+- **Kicken:** Die Orga kann jederzeit einen belegten Sitz räumen (`kickSeat()`); dabei wird
+  die private Hand des Sitzes gelöscht und der Tisch auf `waiting` zurückgesetzt, damit der
+  Platz sofort neu beitretbar ist. Läuft die Partie schon, gehen die übrigen drei Hände dabei
+  nicht verloren, aber der Rundenstand ist danach nicht mehr konsistent – gedacht für
+  "jemand ist raus/hängt fest", nicht als Mitten-in-der-Runde-Feature.
 - **Bekannte Einschränkung – Zuginhalt:** Die Regeln prüfen, dass nur Tisch-Teilnehmer
   den öffentlichen Spielstand ändern dürfen, aber nicht inhaltlich, ob ein Zug nach den
   Tichu-Regeln gültig ist (das würde die komplette `combos.js`-Logik in der

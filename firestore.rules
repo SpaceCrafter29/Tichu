@@ -6,6 +6,13 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    // Fester Turnier-Orga-Account (Benutzername "Panda", eigenes Passwort in Firebase Auth
+    // hinterlegt). Die E-Mail steckt im Auth-Token und kann von niemand anderem vorgetäuscht
+    // werden - im Gegensatz zu einem Anzeigenamen, den jeder selbst frei setzen könnte.
+    function isOrganizer() {
+      return signedIn() && request.auth.token.email == 'panda@tichu.local';
+    }
+
     // Hat `request.auth.uid` irgendeinen der vier Sitzplätze dieses Tisches beansprucht?
     // (Ohne diese Prüfung könnte jeder beliebige angemeldete Nutzer fremde Tische verändern.)
     function isParticipant(gameId) {
@@ -37,18 +44,34 @@ service cloud.firestore {
         && (before[3] == null || before[3] == after[3]);
     }
 
+    // Für's Kicken: genau EIN belegter Sitz wird wieder frei (null), alle anderen bleiben exakt
+    // gleich - kein sonstiges Umsortieren/Löschen mehrerer Sitze in einem Rutsch.
+    function isSingleSeatCleared(before, after) {
+      return
+        (before[0] != null && after[0] == null && before[1] == after[1] && before[2] == after[2] && before[3] == after[3])
+        || (before[1] != null && after[1] == null && before[0] == after[0] && before[2] == after[2] && before[3] == after[3])
+        || (before[2] != null && after[2] == null && before[0] == after[0] && before[1] == after[1] && before[3] == after[3])
+        || (before[3] != null && after[3] == null && before[0] == after[0] && before[1] == after[1] && before[2] == after[2]);
+    }
+
     match /games/{gameId} {
       // Öffentlicher Spielstand (Sitz-Tokens, Stiche, Punkte, wer am Zug ist) - enthält
       // absichtlich keine uids/Anzeigenamen, ist also für alle angemeldeten Nutzer unbedenklich.
       allow read: if signedIn();
-      allow create: if signedIn();
-      // Nur das Belegen eines freien Sitzes (Beitreten) - kein "isParticipant darf alles"-Fallback,
-      // sonst könnte jeder Teilnehmer per direktem Firestore-Schreibzugriff fremde Sitze
-      // überschreiben/kicken. Echte Spielzug-Updates während der Partie bekommen später eine eigene,
-      // ebenso eng gefasste Regel, sobald das Spielbrett ans Backend angebunden wird.
+      // Nur die Turnier-Orga darf neue Tische eröffnen.
+      allow create: if isOrganizer();
+      // Entweder: normales Beitreten (nur freie Sitze füllen, kein Überschreiben - kein
+      // "isParticipant darf alles"-Fallback, sonst könnte jeder Teilnehmer per direktem
+      // Firestore-Schreibzugriff fremde Sitze überschreiben). Oder: die Orga kickt genau
+      // einen belegten Sitz wieder raus und öffnet den Tisch dafür neu ("waiting").
       allow update: if signedIn()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['seats', 'status'])
-        && seatsOnlyGrow(resource.data.seats, request.resource.data.seats);
+        && (
+          seatsOnlyGrow(resource.data.seats, request.resource.data.seats)
+          || (isOrganizer()
+            && isSingleSeatCleared(resource.data.seats, request.resource.data.seats)
+            && request.resource.data.status == 'waiting')
+        );
       allow delete: if false;
 
       // Die Hand jedes Sitzes: nur die uid, die den Sitz beansprucht hat, darf sie lesen.
@@ -73,6 +96,10 @@ service cloud.firestore {
           (resource.data.hand.size() == 0
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hand']))
         );
+
+        // Kicken: die Orga entfernt die private Hand komplett, der Sitz kann danach frisch
+        // neu beansprucht werden (siehe kickSeat() in lobby.js).
+        allow delete: if isOrganizer();
       }
 
       // Ereignis-Log der gespielten Züge (einmal gespielte Karten sind ohnehin öffentlich).

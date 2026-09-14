@@ -11,66 +11,66 @@
   <h1>Tichu-Turnier</h1>
   <p class="sub">Melde dich an, um mitzuspielen.</p>
 
-  <div class="panel" id="status-panel">
-    <p class="muted" id="status">Verbinde mit Firebase…</p>
-  </div>
-
-  <div class="panel" id="name-panel" hidden>
-    <label for="name">Dein Anzeigename</label>
-    <p class="muted">Nur für deine eigene Turniertabelle sichtbar - deine Mitspieler sehen ihn während eines laufenden Spiels nicht.</p>
-    <input type="text" id="name" maxlength="40" placeholder="z. B. Alex" />
+  <div class="panel" id="login-panel">
+    <label for="username">Benutzername</label>
+    <input type="text" id="username" maxlength="40" placeholder="z. B. Stefan" autocomplete="username" />
+    <label for="password" style="margin-top: 12px; display: block;">Passwort</label>
+    <input type="password" id="password" placeholder="Passwort" autocomplete="current-password" />
+    <p class="muted" style="margin-top: 8px;">
+      Neuer Benutzername? Beim ersten Login mit einem Passwort deiner Wahl wird der Account
+      automatisch angelegt - merk dir das Passwort, es schützt danach deinen Namen.
+    </p>
     <div class="row" style="margin-top: 12px;">
-      <button id="save-name">Weiter zur Lobby</button>
+      <button id="login-btn">Anmelden</button>
     </div>
-    <p class="error" id="name-error" hidden></p>
+    <p class="error" id="login-error" hidden></p>
   </div>
 </main>
 
 <script type="module">
-  import { ensureSignedIn, getProfile, setDisplayName } from './lib/auth.js';
+  import { login, getSignedInUser, getProfile } from './lib/auth.js';
 
-  const statusEl = document.getElementById('status');
-  const namePanel = document.getElementById('name-panel');
-  const nameInput = document.getElementById('name');
-  const nameError = document.getElementById('name-error');
+  const usernameInput = document.getElementById('username');
+  const passwordInput = document.getElementById('password');
+  const loginBtn = document.getElementById('login-btn');
+  const loginError = document.getElementById('login-error');
 
-  try {
-    const user = await ensureSignedIn();
-    statusEl.textContent = 'Angemeldet.';
-    const profile = await getProfile(user.uid);
+  // Schon eingeloggt (Session übersteht Reload)? Dann direkt weiter zur Lobby.
+  const existing = await getSignedInUser().catch(() => null);
+  if (existing) {
+    const profile = await getProfile(existing.uid).catch(() => null);
     if (profile && profile.displayName) {
       window.location.href = 'lobby.html';
-    } else {
-      document.getElementById('status-panel').hidden = true;
-      namePanel.hidden = false;
     }
-  } catch (e) {
-    console.error(e);
-    statusEl.textContent = 'Anmeldung fehlgeschlagen: ' + describeError(e);
   }
 
-  document.getElementById('save-name').addEventListener('click', async () => {
-    const name = nameInput.value.trim();
-    if (!name) {
-      nameError.textContent = 'Bitte einen Namen eingeben.';
-      nameError.hidden = false;
-      return;
-    }
+  async function doLogin() {
+    loginError.hidden = true;
+    loginBtn.disabled = true;
     try {
-      const user = await ensureSignedIn();
-      await setDisplayName(user.uid, name);
+      await login(usernameInput.value, passwordInput.value);
       window.location.href = 'lobby.html';
     } catch (e) {
       console.error(e);
-      nameError.textContent = 'Konnte Namen nicht speichern: ' + describeError(e);
-      nameError.hidden = false;
+      loginError.textContent = describeError(e);
+      loginError.hidden = false;
+      loginBtn.disabled = false;
     }
-  });
+  }
+
+  loginBtn.addEventListener('click', doLogin);
+  passwordInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
 
   function describeError(e) {
     const code = e && e.code;
+    if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
+      return 'Falscher Benutzername oder falsches Passwort.';
+    }
+    if (code === 'auth/weak-password') {
+      return 'Passwort ist zu kurz (mind. 6 Zeichen) - das gilt nur beim erstmaligen Anlegen.';
+    }
     if (code === 'auth/configuration-not-found' || code === 'auth/admin-restricted-operation') {
-      return 'Anonyme Anmeldung ist in der Firebase-Konsole noch nicht aktiviert.';
+      return 'Anmeldung per E-Mail/Passwort ist in der Firebase-Konsole noch nicht aktiviert.';
     }
     if (code === 'permission-denied') {
       return 'Firestore-Regeln blockieren diesen Zugriff.';
