@@ -37,7 +37,7 @@
 </main>
 
 <script type="module">
-  import { getSignedInUser, getProfile, isOrganizer } from './lib/auth.js';
+  import { ensureSignedIn, getProfile, isOrganizer } from './lib/auth.js';
   import { watchOpenGames, watchAllGames, createTable, joinTable, kickSeat, watchGame, watchMySeat, SEAT_LABELS } from './lib/lobby.js';
 
   const errorEl = document.getElementById('error');
@@ -47,7 +47,7 @@
     errorEl.hidden = false;
   }
 
-  const user = await getSignedInUser().catch((e) => { showError(e); return null; });
+  const user = await ensureSignedIn().catch((e) => { showError(e); return null; });
   if (!user) { window.location.href = 'index.html'; throw new Error('nicht angemeldet'); }
 
   const profile = await getProfile(user.uid);

@@ -4,15 +4,20 @@ Online-Tichu-Turnierplattform für 4 Spieler. Anmeldung, Lobby mit laufenden Spi
 anonymisierte Gegner (kein Cheating durch Kennen der Mitspieler) und vollständiges
 Regelwerk (Schupfen, große/kleine Tichu-Ansage, Bomben, Drache/Phönix/Hund/Mahjong).
 
-Statische Seite (GitHub Pages, kein eigener Server) + Firebase (Firestore + Auth per
-E-Mail/Passwort) als reine Sync-Schicht. Firebase-Projekt: `tichu-1c42b` – neu angelegt,
-nie öffentlich exponiert (bewusst nicht das alte Schachturnier-Projekt).
+Statische Seite (GitHub Pages, kein eigener Server) + Firebase (Firestore + Anonymous
+Auth) als reine Sync-Schicht. Firebase-Projekt: `tichu-1c42b` – neu angelegt, nie
+öffentlich exponiert (bewusst nicht das alte Schachturnier-Projekt).
 
-**Login/Orga-Rolle:** Anmeldung per frei gewähltem Benutzernamen + Passwort (Account wird
-beim ersten Login automatisch angelegt). Der Benutzername "Panda" (fixes Passwort) ist der
-Turnier-Orga-Account – nur er darf neue Tische erstellen und Spieler aus einem Tisch kicken.
-Das wird serverseitig über `firestore.rules` (`isOrganizer()`, prüft die E-Mail im
-Auth-Token) durchgesetzt, nicht nur in der UI versteckt.
+**Login/Orga-Rolle:** Anmeldung bleibt einfach anonym + Anzeigename (wie gehabt). Die
+Turnier-Orga-Rolle hängt an der festen anonymen `uid` eines Geräts/Browsers, nicht an einem
+Passwort – nur dieser eine, in `firestore.rules` und `lib/auth.js` (`ORGANIZER_UID`)
+hinterlegte Browser darf neue Tische erstellen und Spieler aus einem Tisch kicken.
+Serverseitig über `firestore.rules` (`isOrganizer()`) durchgesetzt, nicht nur in der UI
+versteckt. **Einmalige Einrichtung:** `index.html` im Orga-Browser öffnen, Anzeigename
+speichern, die dort angezeigte "Meine ID" kopieren und an beiden Stellen
+(`ORGANIZER_UID` in `lib/auth.js`, `isOrganizer()` in `firestore.rules`) eintragen -
+danach neu veröffentlichen/deployen. Achtung: diese uid ist an den Browser gebunden und
+geht bei gelöschten Cookies/anderem Gerät verloren, dann muss neu eingerichtet werden.
 
 ## Stand
 
@@ -29,12 +34,13 @@ Auth-Token) durchgesetzt, nicht nur in der UI versteckt.
 **Neu, noch nicht Ende-zu-Ende getestet** – Firebase-Anbindung:
 
 - `lib/firebase-config.js` – Projektkonfiguration.
-- `lib/auth.js` – Login per Benutzername+Passwort (E-Mail/Passwort-Auth intern, Account wird
-  beim ersten Login angelegt), eigenes Profil (`users/{uid}.displayName`), `isOrganizer()`.
+- `lib/auth.js` – anonyme Anmeldung, eigenes Profil (`users/{uid}.displayName`),
+  `isOrganizer()` (Vergleich gegen die feste `ORGANIZER_UID`).
 - `lib/lobby.js` – Tisch erstellen/beitreten, Kartengabe sobald der vierte Sitz belegt ist,
   `kickSeat()` (nur Orga) entfernt einen Spieler wieder aus einem Tisch.
-- `index.html` – Login (Benutzername+Passwort). `lobby.html` – offene Tische, eigener
-  Tisch/Sitze, für die Orga zusätzlich eine Admin-Ansicht aller Tische mit Kick-Buttons.
+- `index.html` – Login/Namenseingabe, zeigt die eigene uid für die Orga-Einrichtung.
+  `lobby.html` – offene Tische, eigener Tisch/Sitze, für die Orga zusätzlich eine
+  Admin-Ansicht aller Tische mit Kick-Buttons.
 - `firestore.rules` – Sicherheitsregeln (siehe unten).
 - `.github/workflows/static.yml` – Deploy auf GitHub Pages bei Push auf `main`.
 
@@ -46,8 +52,8 @@ Tichu-Ansage-Buttons) und die Turnierstruktur über mehrere Tische/Runden hinweg
 1. **Firestore aktivieren**: [Firebase-Konsole](https://console.firebase.google.com/project/tichu-1c42b/firestore)
    → „Datenbank erstellen" → **Produktionsmodus** (nicht Testmodus – die Regeln unten
    übernehmen die Absicherung).
-2. **E-Mail/Passwort-Anmeldung aktivieren**: Konsole → Authentication → Sign-in method →
-   „Email/Password" aktivieren (die alte „Anonymous"-Methode wird nicht mehr gebraucht).
+2. **Anonyme Anmeldung aktivieren**: Konsole → Authentication → Sign-in method →
+   „Anonymous" aktivieren.
 3. **Sicherheitsregeln einspielen**: Firestore → Rules → Inhalt von `firestore.rules`
    hier im Repo einfügen und veröffentlichen.
 

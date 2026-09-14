@@ -6,11 +6,11 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // Fester Turnier-Orga-Account (Benutzername "Panda", eigenes Passwort in Firebase Auth
-    // hinterlegt). Die E-Mail steckt im Auth-Token und kann von niemand anderem vorgetäuscht
-    // werden - im Gegensatz zu einem Anzeigenamen, den jeder selbst frei setzen könnte.
+    // Fester Turnier-Orga: die anonyme uid des Browsers/Geräts der Turnierleitung (siehe
+    // ORGANIZER_UID in lib/auth.js - muss hier exakt gleich eingetragen sein). Eine uid kann
+    // im Gegensatz zu einem Anzeigenamen nicht von einem anderen Nutzer vorgetäuscht werden.
     function isOrganizer() {
-      return signedIn() && request.auth.token.email == 'panda@tichu.local';
+      return signedIn() && request.auth.uid == 'PASTE_ORGANIZER_UID_HERE';
     }
 
     // Hat `request.auth.uid` irgendeinen der vier Sitzplätze dieses Tisches beansprucht?
