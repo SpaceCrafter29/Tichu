@@ -8,8 +8,14 @@
 </head>
 <body>
 <main>
-  <h1>Lobby</h1>
-  <p class="sub" id="greeting">…</p>
+  <div class="row">
+    <h1 style="margin:0">Lobby</h1>
+    <a href="orga.html" class="muted" style="font-size: 0.85rem;">Orga-Zugang</a>
+  </div>
+  <div class="row" style="align-items: baseline;">
+    <p class="sub" id="greeting" style="margin:0">…</p>
+    <button id="logout-btn" class="secondary" style="padding: 6px 12px; font-size: 0.85rem;">Abmelden</button>
+  </div>
 
   <div class="panel" id="active-panel" hidden>
     <h3 style="margin-top:0" id="active-name">Dein Tisch</h3>
@@ -18,27 +24,18 @@
   </div>
 
   <div class="panel">
-    <div class="row">
-      <h3 style="margin:0">Offene Tische</h3>
-      <button id="create-table" hidden>Neuen Tisch erstellen</button>
-    </div>
+    <h3 style="margin:0">Offene Tische</h3>
     <div id="table-list" style="margin-top: 12px;">
       <p class="muted">Lade…</p>
     </div>
-  </div>
-
-  <div class="panel" id="admin-panel" hidden>
-    <h3 style="margin-top:0">Orga: alle Tische</h3>
-    <p class="muted">Sitz anklicken, um jemanden aus dem Tisch zu kicken (Platz wird wieder frei).</p>
-    <div id="admin-list" style="margin-top: 12px;"></div>
   </div>
 
   <p class="error" id="error" hidden></p>
 </main>
 
 <script type="module">
-  import { ensureSignedIn, getProfile, isOrganizer } from './lib/auth.js';
-  import { watchOpenGames, watchAllGames, createTable, joinTable, kickSeat, watchGame, watchMySeat, SEAT_LABELS } from './lib/lobby.js';
+  import { ensureSignedIn, getProfile, logout } from './lib/auth.js';
+  import { watchOpenGames, joinTable, watchGame, watchMySeat, SEAT_LABELS } from './lib/lobby.js';
 
   const errorEl = document.getElementById('error');
   function showError(e) {
@@ -55,13 +52,12 @@
     window.location.href = 'index.html';
     throw new Error('kein Profil');
   }
-  const amOrganizer = isOrganizer(user);
-  document.getElementById('greeting').textContent =
-    `Angemeldet als ${profile.displayName}${amOrganizer ? ' (Turnier-Orga)' : ''}.`;
-  if (amOrganizer) {
-    document.getElementById('create-table').hidden = false;
-    document.getElementById('admin-panel').hidden = false;
-  }
+  document.getElementById('greeting').textContent = `Angemeldet als ${profile.displayName}.`;
+
+  document.getElementById('logout-btn').addEventListener('click', async () => {
+    await logout();
+    window.location.href = 'index.html';
+  });
 
   // Session-Zustand: an welchem Tisch/Sitz nehme ich gerade teil (übersteht Reload).
   let mine = JSON.parse(localStorage.getItem('tichu.mySeat') || 'null');
@@ -140,59 +136,6 @@
       tableListEl.appendChild(row);
     }
   });
-
-  document.getElementById('create-table').addEventListener('click', async () => {
-    try {
-      const gameId = await createTable(1000);
-      const { seatIndex } = await joinTable(gameId, user.uid);
-      attachToTable(gameId, seatIndex);
-    } catch (e) {
-      showError(e);
-    }
-  });
-
-  if (amOrganizer) {
-    const adminListEl = document.getElementById('admin-list');
-    watchAllGames((games) => {
-      if (games.length === 0) {
-        adminListEl.innerHTML = '<p class="muted">Keine Tische vorhanden.</p>';
-        return;
-      }
-      adminListEl.innerHTML = '';
-      for (const game of games) {
-        const row = document.createElement('div');
-        row.className = 'table-row';
-        row.style.flexDirection = 'column';
-        row.style.alignItems = 'stretch';
-        const tableName = game.name || `Tisch ${game.id.slice(0, 6)}`;
-        const title = document.createElement('div');
-        title.innerHTML = `<strong>${tableName}</strong> <span class="muted">(${game.status})</span>`;
-        row.appendChild(title);
-        const grid = document.createElement('div');
-        grid.className = 'seat-grid';
-        grid.style.marginTop = '6px';
-        game.seats.forEach((token, i) => {
-          const chip = document.createElement('button');
-          chip.className = 'secondary';
-          chip.style.padding = '6px';
-          chip.textContent = token ? `${SEAT_LABELS[i]}: kicken` : `${SEAT_LABELS[i]}: frei`;
-          chip.disabled = !token;
-          chip.addEventListener('click', async () => {
-            chip.disabled = true;
-            try {
-              await kickSeat(game.id, i);
-            } catch (e) {
-              showError(e);
-              chip.disabled = false;
-            }
-          });
-          grid.appendChild(chip);
-        });
-        row.appendChild(grid);
-        adminListEl.appendChild(row);
-      }
-    });
-  }
 </script>
 </body>
 </html>

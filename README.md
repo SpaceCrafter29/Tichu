@@ -8,16 +8,20 @@ Statische Seite (GitHub Pages, kein eigener Server) + Firebase (Firestore + Anon
 Auth) als reine Sync-Schicht. Firebase-Projekt: `tichu-1c42b` – neu angelegt, nie
 öffentlich exponiert (bewusst nicht das alte Schachturnier-Projekt).
 
-**Login/Orga-Rolle:** Anmeldung bleibt einfach anonym + Anzeigename (wie gehabt). Die
+**Login/Orga-Rolle:** Anmeldung bleibt einfach anonym + Anzeigename (wie gehabt), inklusive
+Abmelden-Button (`logout()` in `lib/auth.js`) - ein Browser kann sich so nacheinander als
+verschiedene Spieler anmelden, ohne Storage manuell zu löschen. Tisch erstellen und Kicken
+passiert nicht mehr in der normalen Lobby, sondern auf der separaten `orga.html`. Die
 Turnier-Orga-Rolle hängt an der festen anonymen `uid` eines Geräts/Browsers, nicht an einem
 Passwort – nur dieser eine, in `firestore.rules` und `lib/auth.js` (`ORGANIZER_UID`)
-hinterlegte Browser darf neue Tische erstellen und Spieler aus einem Tisch kicken.
-Serverseitig über `firestore.rules` (`isOrganizer()`) durchgesetzt, nicht nur in der UI
-versteckt. **Einmalige Einrichtung:** `index.html` im Orga-Browser öffnen, Anzeigename
-speichern, die dort angezeigte "Meine ID" kopieren und an beiden Stellen
-(`ORGANIZER_UID` in `lib/auth.js`, `isOrganizer()` in `firestore.rules`) eintragen -
-danach neu veröffentlichen/deployen. Achtung: diese uid ist an den Browser gebunden und
-geht bei gelöschten Cookies/anderem Gerät verloren, dann muss neu eingerichtet werden.
+hinterlegte Browser hat auf `orga.html` überhaupt Zugriff auf die Buttons; alle anderen
+sehen dort nur einen "kein Zugriff"-Hinweis mit der eigenen uid. Serverseitig über
+`firestore.rules` (`isOrganizer()`) durchgesetzt, nicht nur in der UI versteckt.
+**Einmalige Einrichtung:** `orga.html` im Orga-Browser öffnen, die dort angezeigte "Meine
+ID" kopieren und an beiden Stellen (`ORGANIZER_UID` in `lib/auth.js`, `isOrganizer()` in
+`firestore.rules`) eintragen - danach neu veröffentlichen/deployen. Achtung: diese uid ist
+an den Browser gebunden und geht bei gelöschten Cookies/anderem Gerät verloren, dann muss
+neu eingerichtet werden.
 
 ## Stand
 
@@ -34,13 +38,13 @@ geht bei gelöschten Cookies/anderem Gerät verloren, dann muss neu eingerichtet
 **Neu, noch nicht Ende-zu-Ende getestet** – Firebase-Anbindung:
 
 - `lib/firebase-config.js` – Projektkonfiguration.
-- `lib/auth.js` – anonyme Anmeldung, eigenes Profil (`users/{uid}.displayName`),
-  `isOrganizer()` (Vergleich gegen die feste `ORGANIZER_UID`).
+- `lib/auth.js` – anonyme Anmeldung, `logout()`, eigenes Profil
+  (`users/{uid}.displayName`), `isOrganizer()` (Vergleich gegen die feste `ORGANIZER_UID`).
 - `lib/lobby.js` – Tisch erstellen/beitreten, Kartengabe sobald der vierte Sitz belegt ist,
   `kickSeat()` (nur Orga) entfernt einen Spieler wieder aus einem Tisch.
 - `index.html` – Login/Namenseingabe, zeigt die eigene uid für die Orga-Einrichtung.
-  `lobby.html` – offene Tische, eigener Tisch/Sitze, für die Orga zusätzlich eine
-  Admin-Ansicht aller Tische mit Kick-Buttons.
+  `lobby.html` – offene Tische, eigener Tisch/Sitze, Abmelden. `orga.html` – separater
+  Zugang für die Turnier-Orga: Tisch erstellen, Admin-Ansicht aller Tische mit Kick-Buttons.
 - `firestore.rules` – Sicherheitsregeln (siehe unten).
 - `.github/workflows/static.yml` – Deploy auf GitHub Pages bei Push auf `main`.
 

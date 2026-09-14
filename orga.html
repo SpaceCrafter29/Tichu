@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tichu - Orga</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<main>
+  <div class="row">
+    <h1 style="margin:0">Orga-Zugang</h1>
+    <a href="lobby.html" class="muted" style="font-size: 0.85rem;">Zur Lobby</a>
+  </div>
+  <p class="sub" id="greeting">…</p>
+
+  <div class="panel" id="denied-panel" hidden>
+    <p>Dieses Gerät/dieser Browser ist nicht als Turnier-Orga hinterlegt.</p>
+    <p class="muted">
+      Meine ID: <code id="my-uid">…</code><br />
+      Zum Einrichten diese ID als <code>ORGANIZER_UID</code> in <code>lib/auth.js</code> und in
+      <code>isOrganizer()</code> in <code>firestore.rules</code> eintragen, dann Regeln neu
+      veröffentlichen.
+    </p>
+  </div>
+
+  <div class="panel" id="create-panel" hidden>
+    <div class="row">
+      <h3 style="margin:0">Neuer Tisch</h3>
+      <button id="create-table">Erstellen</button>
+    </div>
+  </div>
+
+  <div class="panel" id="admin-panel" hidden>
+    <h3 style="margin-top:0">Alle Tische</h3>
+    <p class="muted">Sitz anklicken, um jemanden zu kicken (Platz wird wieder frei).</p>
+    <div id="admin-list" style="margin-top: 12px;"></div>
+  </div>
+
+  <p class="error" id="error" hidden></p>
+</main>
+
+<script type="module">
+  import { ensureSignedIn, getProfile, isOrganizer } from './lib/auth.js';
+  import { watchAllGames, createTable, joinTable, kickSeat, SEAT_LABELS } from './lib/lobby.js';
+
+  const errorEl = document.getElementById('error');
+  function showError(e) {
+    console.error(e);
+    errorEl.textContent = e && e.message ? e.message : String(e);
+    errorEl.hidden = false;
+  }
+
+  const user = await ensureSignedIn().catch((e) => { showError(e); return null; });
+  if (!user) { window.location.href = 'index.html'; throw new Error('nicht angemeldet'); }
+
+  const profile = await getProfile(user.uid);
+  if (!profile || !profile.displayName) {
+    window.location.href = 'index.html';
+    throw new Error('kein Profil');
+  }
+  document.getElementById('greeting').textContent = `Angemeldet als ${profile.displayName}.`;
+
+  if (!isOrganizer(user)) {
+    document.getElementById('my-uid').textContent = user.uid;
+    document.getElementById('denied-panel').hidden = false;
+    throw new Error('kein Orga-Zugang auf diesem Gerät');
+  }
+
+  document.getElementById('create-panel').hidden = false;
+  document.getElementById('admin-panel').hidden = false;
+
+  document.getElementById('create-table').addEventListener('click', async () => {
+    try {
+      const gameId = await createTable(1000);
+      await joinTable(gameId, user.uid);
+    } catch (e) {
+      showError(e);
+    }
+  });
+
+  const adminListEl = document.getElementById('admin-list');
+  watchAllGames((games) => {
+    if (games.length === 0) {
+      adminListEl.innerHTML = '<p class="muted">Keine Tische vorhanden.</p>';
+      return;
+    }
+    adminListEl.innerHTML = '';
+    for (const game of games) {
+      const row = document.createElement('div');
+      row.className = 'table-row';
+      row.style.flexDirection = 'column';
+      row.style.alignItems = 'stretch';
+      const tableName = game.name || `Tisch ${game.id.slice(0, 6)}`;
+      const title = document.createElement('div');
+      title.innerHTML = `<strong>${tableName}</strong> <span class="muted">(${game.status})</span>`;
+      row.appendChild(title);
+      const grid = document.createElement('div');
+      grid.className = 'seat-grid';
+      grid.style.marginTop = '6px';
+      game.seats.forEach((token, i) => {
+        const chip = document.createElement('button');
+        chip.className = 'secondary';
+        chip.style.padding = '6px';
+        chip.textContent = token ? `${SEAT_LABELS[i]}: kicken` : `${SEAT_LABELS[i]}: frei`;
+        chip.disabled = !token;
+        chip.addEventListener('click', async () => {
+          chip.disabled = true;
+          try {
+            await kickSeat(game.id, i);
+          } catch (e) {
+            showError(e);
+            chip.disabled = false;
+          }
+        });
+        grid.appendChild(chip);
+      });
+      row.appendChild(grid);
+      adminListEl.appendChild(row);
+    }
+  });
+</script>
+</body>
+</html>

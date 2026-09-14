@@ -15,6 +15,14 @@
     <p class="muted" id="status">Verbinde mit Firebase…</p>
   </div>
 
+  <div class="panel" id="already-panel" hidden>
+    <p id="already-text"></p>
+    <div class="row" style="margin-top: 12px;">
+      <button id="continue-btn">Weiter zur Lobby</button>
+      <button id="logout-btn" class="secondary">Abmelden / anderer Name</button>
+    </div>
+  </div>
+
   <div class="panel" id="name-panel" hidden>
     <label for="name">Dein Anzeigename</label>
     <p class="muted">Nur für deine eigene Turniertabelle sichtbar - deine Mitspieler sehen ihn während eines laufenden Spiels nicht.</p>
@@ -30,28 +38,38 @@
 </main>
 
 <script type="module">
-  import { ensureSignedIn, getProfile, setDisplayName } from './lib/auth.js';
+  import { ensureSignedIn, getProfile, setDisplayName, logout } from './lib/auth.js';
 
   const statusEl = document.getElementById('status');
+  const alreadyPanel = document.getElementById('already-panel');
   const namePanel = document.getElementById('name-panel');
   const nameInput = document.getElementById('name');
   const nameError = document.getElementById('name-error');
 
   try {
     const user = await ensureSignedIn();
-    statusEl.textContent = 'Angemeldet.';
     document.getElementById('my-uid').textContent = user.uid;
     const profile = await getProfile(user.uid);
+    document.getElementById('status-panel').hidden = true;
     if (profile && profile.displayName) {
-      window.location.href = 'lobby.html';
+      document.getElementById('already-text').textContent = `Schon angemeldet als ${profile.displayName}.`;
+      alreadyPanel.hidden = false;
     } else {
-      document.getElementById('status-panel').hidden = true;
       namePanel.hidden = false;
     }
   } catch (e) {
     console.error(e);
     statusEl.textContent = 'Anmeldung fehlgeschlagen: ' + describeError(e);
   }
+
+  document.getElementById('continue-btn').addEventListener('click', () => {
+    window.location.href = 'lobby.html';
+  });
+
+  document.getElementById('logout-btn').addEventListener('click', async () => {
+    await logout();
+    window.location.reload();
+  });
 
   document.getElementById('save-name').addEventListener('click', async () => {
     const name = nameInput.value.trim();
