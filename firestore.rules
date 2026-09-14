@@ -42,15 +42,13 @@ service cloud.firestore {
       // absichtlich keine uids/Anzeigenamen, ist also für alle angemeldeten Nutzer unbedenklich.
       allow read: if signedIn();
       allow create: if signedIn();
-      // Update entweder durch tatsächliche Teilnehmer (spätere Spielzüge - prüft NICHT die
-      // inhaltliche Spielregel-Korrektheit, das bräuchte eine serverseitige Instanz) oder durch
-      // einen neuen Spieler, der ausschließlich einen freien Sitz belegt (Beitreten selbst).
-      allow update: if signedIn() && (
-        isParticipant(gameId)
-        ||
-        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['seats', 'status'])
-          && seatsOnlyGrow(resource.data.seats, request.resource.data.seats))
-      );
+      // Nur das Belegen eines freien Sitzes (Beitreten) - kein "isParticipant darf alles"-Fallback,
+      // sonst könnte jeder Teilnehmer per direktem Firestore-Schreibzugriff fremde Sitze
+      // überschreiben/kicken. Echte Spielzug-Updates während der Partie bekommen später eine eigene,
+      // ebenso eng gefasste Regel, sobald das Spielbrett ans Backend angebunden wird.
+      allow update: if signedIn()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['seats', 'status'])
+        && seatsOnlyGrow(resource.data.seats, request.resource.data.seats);
       allow delete: if false;
 
       // Die Hand jedes Sitzes: nur die uid, die den Sitz beansprucht hat, darf sie lesen.
