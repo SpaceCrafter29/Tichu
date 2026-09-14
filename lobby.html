@@ -12,7 +12,7 @@
   <p class="sub" id="greeting">…</p>
 
   <div class="panel" id="active-panel" hidden>
-    <h3 style="margin-top:0">Dein Tisch</h3>
+    <h3 style="margin-top:0" id="active-name">Dein Tisch</h3>
     <p class="muted" id="active-status"></p>
     <div class="seat-grid" id="active-seats"></div>
   </div>
@@ -72,6 +72,7 @@
       return;
     }
     activePanel.hidden = false;
+    document.getElementById('active-name').textContent = latestGame.name ? `Tisch ${latestGame.name}` : 'Dein Tisch';
     const labels = { waiting: 'Warte auf Mitspieler…', dealt: 'Karten ausgeteilt - Spielansicht folgt.', playing: 'Spiel läuft.', finished: 'Spiel beendet.' };
     let text = labels[latestGame.status] || latestGame.status;
     if (latestSeat && latestSeat.hand) text += ` Deine Hand: ${latestSeat.hand.length} Karten.`;
@@ -105,8 +106,9 @@
       const row = document.createElement('div');
       row.className = 'table-row';
       const already = mine && mine.gameId === game.id;
+      const tableName = game.name || `Tisch ${game.id.slice(0, 6)}`;
       row.innerHTML = `
-        <span>Tisch ${game.id.slice(0, 6)} <span class="muted">(${4 - openSeats}/4, Ziel ${game.target})</span></span>
+        <span>${tableName} <span class="muted">(${4 - openSeats}/4, Ziel ${game.target})</span></span>
       `;
       const btn = document.createElement('button');
       btn.textContent = already ? 'Beigetreten' : 'Beitreten';
