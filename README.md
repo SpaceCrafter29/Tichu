@@ -61,6 +61,14 @@ ausführen – das geht nur über die Konsole mit deinem Google-Account.
   eigenen Speicher, bevor die Firestore-Regeln ihm nur noch Lesezugriff auf die eigene
   Hand erlauben. Für ein härteres Modell bräuchte es eine serverseitige Cloud Function
   (Firebase-CLI/Blaze-Plan nötig) – bewusst als Ausbaustufe zurückgestellt.
+- **Bekannte Einschränkung – Sitz-Zuteilung:** Aus demselben Grund (kein Backend) prüft
+  die Regel für das Austeilen nur strukturell (nur das `hand`-Feld, nur solange leer),
+  nicht mehr zusätzlich "ist der Schreiber Teilnehmer dieses Tisches" – Firestore-Regeln
+  können `exists()`/`get()` nicht gegen die eigene, noch nicht committete Transaktion
+  prüfen, ein frisch beitretender Spieler könnte sich selbst also nie als "Teilnehmer
+  genug" ausweisen, um seinen eigenen Beitritt freizugeben (führte zuvor zu einem
+  Join-Fehler). Das Beitreten selbst ist weiterhin strikt "nur leere Sitze füllen,
+  nie überschreiben" (`seatsOnlyGrow` in den Regeln).
 - **Bekannte Einschränkung – Zuginhalt:** Die Regeln prüfen, dass nur Tisch-Teilnehmer
   den öffentlichen Spielstand ändern dürfen, aber nicht inhaltlich, ob ein Zug nach den
   Tichu-Regeln gültig ist (das würde die komplette `combos.js`-Logik in der

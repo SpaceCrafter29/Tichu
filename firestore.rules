@@ -26,16 +26,31 @@ service cloud.firestore {
       allow read, write: if signedIn() && request.auth.uid == uid;
     }
 
+    // Sitzplätze dürfen beim Beitreten nur von null auf belegt wechseln - nie umgekehrt und nie
+    // ein bereits belegter Platz überschrieben werden. Damit kommt das Beitreten ohne isParticipant()
+    // aus: exists()/get() in Regeln sehen die eigene, noch nicht committete Transaktion nicht, ein
+    // frisch beitretender Spieler wäre also nie "Teilnehmer genug", um sein eigenes Update freizugeben.
+    function seatsOnlyGrow(before, after) {
+      return (before[0] == null || before[0] == after[0])
+        && (before[1] == null || before[1] == after[1])
+        && (before[2] == null || before[2] == after[2])
+        && (before[3] == null || before[3] == after[3]);
+    }
+
     match /games/{gameId} {
       // Öffentlicher Spielstand (Sitz-Tokens, Stiche, Punkte, wer am Zug ist) - enthält
       // absichtlich keine uids/Anzeigenamen, ist also für alle angemeldeten Nutzer unbedenklich.
       allow read: if signedIn();
       allow create: if signedIn();
-      // Update nur durch tatsächliche Teilnehmer dieses Tisches (verhindert, dass fremde
-      // Nutzer Punkte/Zustand anderer Tische verändern). Prüft NICHT die inhaltliche
-      // Spielregel-Korrektheit jedes Zugs - das bräuchte eine serverseitige Instanz
-      // (Cloud Function), die dieses Projekt bewusst (noch) nicht hat.
-      allow update: if signedIn() && isParticipant(gameId);
+      // Update entweder durch tatsächliche Teilnehmer (spätere Spielzüge - prüft NICHT die
+      // inhaltliche Spielregel-Korrektheit, das bräuchte eine serverseitige Instanz) oder durch
+      // einen neuen Spieler, der ausschließlich einen freien Sitz belegt (Beitreten selbst).
+      allow update: if signedIn() && (
+        isParticipant(gameId)
+        ||
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['seats', 'status'])
+          && seatsOnlyGrow(resource.data.seats, request.resource.data.seats))
+      );
       allow delete: if false;
 
       // Die Hand jedes Sitzes: nur die uid, die den Sitz beansprucht hat, darf sie lesen.
@@ -53,8 +68,9 @@ service cloud.firestore {
           ||
           // einmaliges Austeilen durch den Mitspieler, der den vierten Sitz füllt: darf nur
           // das `hand`-Feld setzen, und nur solange die Hand noch leer (also nicht ausgeteilt) ist.
-          (isParticipant(gameId)
-            && resource.data.hand.size() == 0
+          // (Kein isParticipant()-Check hier, aus demselben Transaktions-Sichtbarkeitsgrund wie
+          // oben - Restrisiko ist dokumentiert in der README.)
+          (resource.data.hand.size() == 0
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hand']))
         );
       }
