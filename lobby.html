@@ -8,10 +8,7 @@
 </head>
 <body>
 <main>
-  <div class="row">
-    <h1 style="margin:0">Lobby</h1>
-    <a href="orga.html" class="muted" style="font-size: 0.85rem;">Orga-Zugang</a>
-  </div>
+  <h1 style="margin:0">Lobby</h1>
   <div class="row" style="align-items: baseline;">
     <p class="sub" id="greeting" style="margin:0">…</p>
     <button id="logout-btn" class="secondary" style="padding: 6px 12px; font-size: 0.85rem;">Abmelden</button>
@@ -24,7 +21,10 @@
   </div>
 
   <div class="panel">
-    <h3 style="margin:0">Offene Tische</h3>
+    <div class="row">
+      <h3 style="margin:0">Offene Tische</h3>
+      <button id="create-table">Neuen Tisch erstellen</button>
+    </div>
     <div id="table-list" style="margin-top: 12px;">
       <p class="muted">Lade…</p>
     </div>
@@ -35,7 +35,7 @@
 
 <script type="module">
   import { ensureSignedIn, getProfile, logout } from './lib/auth.js';
-  import { watchOpenGames, joinTable, watchGame, watchMySeat, SEAT_LABELS } from './lib/lobby.js';
+  import { watchOpenGames, createTable, joinTable, watchGame, watchMySeat, SEAT_LABELS } from './lib/lobby.js';
 
   const errorEl = document.getElementById('error');
   function showError(e) {
@@ -134,6 +134,16 @@
       });
       row.appendChild(btn);
       tableListEl.appendChild(row);
+    }
+  });
+
+  document.getElementById('create-table').addEventListener('click', async () => {
+    try {
+      const gameId = await createTable(1000);
+      const { seatIndex } = await joinTable(gameId, user.uid);
+      attachToTable(gameId, seatIndex);
+    } catch (e) {
+      showError(e);
     }
   });
 </script>

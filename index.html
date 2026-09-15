@@ -31,9 +31,6 @@
       <button id="save-name">Weiter zur Lobby</button>
     </div>
     <p class="error" id="name-error" hidden></p>
-    <p class="muted" style="margin-top: 16px;">
-      Meine ID (für die Turnier-Orga-Einrichtung): <code id="my-uid">…</code>
-    </p>
   </div>
 </main>
 
@@ -48,7 +45,6 @@
 
   try {
     const user = await ensureSignedIn();
-    document.getElementById('my-uid').textContent = user.uid;
     const profile = await getProfile(user.uid);
     document.getElementById('status-panel').hidden = true;
     if (profile && profile.displayName) {
