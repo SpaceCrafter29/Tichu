@@ -20,9 +20,14 @@
     <div class="seat-grid" id="active-seats"></div>
   </div>
 
+  <div class="row" style="margin-top: 8px;">
+    <button id="tab-freeplay">Free Play</button>
+    <button id="tab-tournament" class="secondary">Turnier</button>
+  </div>
+
   <div class="panel">
     <div class="row">
-      <h3 style="margin:0">Offene Tische</h3>
+      <h3 style="margin:0" id="table-list-title">Offene Tische</h3>
       <button id="create-table">Neuen Tisch erstellen</button>
     </div>
     <div id="table-list" style="margin-top: 12px;">
@@ -103,7 +108,14 @@
   if (mine) attachToTable(mine.gameId, mine.seatIndex);
 
   const tableListEl = document.getElementById('table-list');
-  watchOpenGames((games) => {
+  const tableListTitle = document.getElementById('table-list-title');
+  const tabFreeplay = document.getElementById('tab-freeplay');
+  const tabTournament = document.getElementById('tab-tournament');
+
+  let mode = 'freeplay';
+  let unsubOpenGames = null;
+
+  function renderTableList(games) {
     if (games.length === 0) {
       tableListEl.innerHTML = '<p class="muted">Aktuell keine offenen Tische.</p>';
       return;
@@ -135,11 +147,25 @@
       row.appendChild(btn);
       tableListEl.appendChild(row);
     }
-  });
+  }
+
+  function setMode(newMode) {
+    mode = newMode;
+    tabFreeplay.className = mode === 'freeplay' ? '' : 'secondary';
+    tabTournament.className = mode === 'tournament' ? '' : 'secondary';
+    tableListTitle.textContent = mode === 'freeplay' ? 'Offene Tische - Free Play' : 'Offene Tische - Turnier';
+    if (unsubOpenGames) unsubOpenGames();
+    tableListEl.innerHTML = '<p class="muted">Lade…</p>';
+    unsubOpenGames = watchOpenGames(mode, renderTableList);
+  }
+
+  tabFreeplay.addEventListener('click', () => setMode('freeplay'));
+  tabTournament.addEventListener('click', () => setMode('tournament'));
+  setMode('freeplay');
 
   document.getElementById('create-table').addEventListener('click', async () => {
     try {
-      const gameId = await createTable(1000);
+      const gameId = await createTable(mode, 1000);
       const { seatIndex } = await joinTable(gameId, user.uid);
       attachToTable(gameId, seatIndex);
     } catch (e) {
