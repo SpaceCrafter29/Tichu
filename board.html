@@ -254,6 +254,10 @@ async function start() {
   watchEvents(gameId, (evs) => {
     events = evs;
     round = replay(initialHands, events);
+    // Eine alte Fehlermeldung (z. B. aus einem eigenen fehlgeschlagenen Zug) verschwindet
+    // sonst erst beim nächsten EIGENEN erfolgreichen Zug - Züge der anderen räumen sie nicht
+    // weg. Neuer Spielstand = alter Fehler ist ohnehin nicht mehr aktuell.
+    errorMsg = '';
     render();
     autoPlayWish();
   });
