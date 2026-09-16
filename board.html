@@ -80,6 +80,7 @@ import { ensureSignedIn, getProfile } from './lib/auth.js';
 import { getAllHands, postEvent, watchEvents, watchGame, SEAT_LABELS } from './lib/lobby.js';
 import { Round, teamOf } from './engine/game.js';
 import { sortHand, cardPoints } from './engine/cards.js';
+import { classify, canBeat } from './engine/combos.js';
 
 // --- Auth/Setup ------------------------------------------------------------
 const errorEl = document.getElementById('error');
@@ -104,11 +105,21 @@ if (!profile || !profile.displayName) { window.location.href = 'index.html'; thr
 
 let initialHands = null;
 let gameMeta = null;
+let started = false;
 watchGame(gameId, (game) => {
   gameMeta = game;
   if (game) {
     document.getElementById('title').textContent = game.name ? `Tisch ${game.name}` : 'Tichu';
     document.getElementById('subtitle').textContent = `Ziel ${game.target} Punkte`;
+  }
+  // Erst starten, sobald der Tisch WIRKLICH ausgeteilt hat - vorher existieren die privaten
+  // Sitz-Dokumente noch gar nicht alle, das Lesen würde an der Regel scheitern (sieht als
+  // "Missing or insufficient permissions" aus, ist aber nur "noch nicht so weit").
+  if (!started && game && game.status !== 'waiting') {
+    started = true;
+    start();
+  } else if (!started) {
+    document.getElementById('app').innerHTML = '<p class="muted">Warte, bis der Tisch ausgeteilt hat…</p>';
   }
 });
 
@@ -207,6 +218,23 @@ let selected = new Set();
 let schupfenDraft = {}; // {toSeat: cardId}
 let schupfenPendingCardId = null; // gerade angetippte, noch nicht zugeordnete Karte
 let errorMsg = '';
+let autoPlaying = false;
+
+// Wenn man selbst am Zug ist, ein Wunsch offen ist und man eine einzelne passende Karte hat,
+// die den Tischstand schlägt, wird die automatisch gespielt statt sie manuell suchen zu
+// müssen (mehrkartige Erfüllungen - Paar etc. - bleiben weiterhin manuell).
+function autoPlayWish() {
+  if (autoPlaying || !round || round.over || round.pendingDragonGiveaway) return;
+  if (round.turn !== mySeat || round.pendingWish == null) return;
+  const card = round.hands[mySeat].find((c) => c.rank === round.pendingWish && !c.special);
+  if (!card) return;
+  const combo = classify([card]);
+  if (!combo || !canBeat(combo, round.currentTrick.combo)) return;
+  autoPlaying = true;
+  postEvent(gameId, mySeat, 'play', { cardIds: [card.id] })
+    .catch((e) => { errorMsg = e.message || String(e); render(); })
+    .finally(() => { autoPlaying = false; });
+}
 
 function withError(fn) {
   return async (...args) => {
@@ -227,9 +255,9 @@ async function start() {
     events = evs;
     round = replay(initialHands, events);
     render();
+    autoPlayWish();
   });
 }
-start();
 
 // --- Renderer ------------------------------------------------------------
 function render() {
@@ -453,7 +481,9 @@ function renderPlaying() {
         if (!Number.isNaN(n)) wish = n;
       }
     }
-    await postEvent(gameId, mySeat, 'play', { cardIds: cards.map((c) => c.id), wish });
+    const payload = { cardIds: cards.map((c) => c.id) };
+    if (wish != null) payload.wish = wish; // Firestore lehnt explizite undefined-Feldwerte ab
+    await postEvent(gameId, mySeat, 'play', payload);
     selected = new Set();
   }));
   bar.appendChild(playBtn);
