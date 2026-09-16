@@ -204,6 +204,33 @@ function simulateRound(rng) {
   return round;
 }
 
+test('Bombe darf jederzeit außer der Reihe geworfen werden', () => {
+  const bombCards = [card('Jade', 7), card('Schwert', 7), card('Pagode', 7), card('Stern', 7)];
+  const hands = [
+    bombCards.concat([card('Jade', 2)]), // Spieler 0: hat die Bombe, ist aber NICHT am Zug
+    [card('Jade', 9), card('Schwert', 6)], // zweite Karte, damit Spieler 1 nach dem Ausspielen nicht fertig ist
+    [card('Jade', 3)],
+    [card('Jade', 4)],
+  ];
+  const round = new Round({ hands });
+  round.schupfenDone = true;
+  round.playedAny = [false, false, false, false];
+  round.turn = 1;
+  round.currentTrick = { leaderIdx: 1, winnerIdx: null, combo: null, cardsInTrick: [], passesSinceLastPlay: 0 };
+
+  round.play(1, [card('Jade', 9)]); // Spieler 1 eröffnet den Stich
+  assert.equal(round.turn, 2); // regulär wäre jetzt Spieler 2 dran
+
+  // Eine normale Karte darf Spieler 0 weiterhin nur am eigenen Zug spielen...
+  assert.throws(() => round.play(0, [card('Jade', 2)]), /Nicht am Zug/);
+  // ...eine Bombe aber jederzeit, auch außer der Reihe.
+  round.play(0, bombCards);
+  assert.equal(round.currentTrick.combo.type, COMBO.BOMB_QUAD);
+  assert.equal(round.currentTrick.winnerIdx, 0);
+  // Danach geht's normal im Uhrzeigersinn ab der Bomberin/dem Bomber weiter (Spieler 2 wird übersprungen).
+  assert.equal(round.turn, 1);
+});
+
 test('Vollständige Runde: Punkte ergeben 100 (oder 200/0 bei Doppelsieg) plus Tichu-Boni', () => {
   let seed = 12345;
   const rng = () => {

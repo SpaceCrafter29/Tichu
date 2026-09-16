@@ -143,7 +143,6 @@ export class Round {
 
   play(playerIdx, cards, opts = {}) {
     if (this.over) throw new Error('Runde ist bereits beendet');
-    if (this.turn !== playerIdx) throw new Error('Nicht am Zug');
     if (this.pendingDragonGiveaway) throw new Error('Drachenstich muss erst vergeben werden');
     const hand = this.hands[playerIdx];
     const ids = new Set(cards.map((c) => c.id));
@@ -152,8 +151,12 @@ export class Round {
     }
     const combo = classify(cards);
     if (!combo) throw new Error('Ungültige Kombination');
+    // Bomben dürfen jederzeit außer der Reihe geworfen werden, alles andere nur am eigenen Zug.
+    const isBomb = combo.type === COMBO.BOMB_QUAD || combo.type === COMBO.BOMB_STRAIGHTFLUSH;
+    if (this.turn !== playerIdx && !isBomb) throw new Error('Nicht am Zug');
     const current = this.currentTrick.combo;
     if (!canBeat(combo, current)) throw new Error('Kombination schlägt den Tischstand nicht');
+    this.turn = playerIdx; // bei einer Bombe außer der Reihe geht der Zug ab jetzt von hier weiter
 
     if (combo.type === COMBO.SINGLE && cards[0].special === 'MAHJONG') {
       const wish = opts.wish;

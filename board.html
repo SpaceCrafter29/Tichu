@@ -716,10 +716,14 @@ function renderPlaying() {
   handZone.appendChild(handLabel);
   const row = document.createElement('div');
   row.className = 'cards-row';
+  // Karten bleiben IMMER auswählbar, auch außer der Reihe - eine Bombe darf jederzeit geworfen
+  // werden (siehe engine/game.js: Round.play() erlaubt das explizit). Ob eine Auswahl tatsächlich
+  // spielbar ist, entscheidet der "Karten spielen"-Button unten.
+  const canSelect = !round.pendingDragonGiveaway;
   for (const c of sortHand(round.hands[mySeat])) {
     row.appendChild(cardEl(c, {
       selected: selected.has(c.id),
-      onClick: round.turn === mySeat ? () => { selected.has(c.id) ? selected.delete(c.id) : selected.add(c.id); render(); } : null,
+      onClick: canSelect ? () => { selected.has(c.id) ? selected.delete(c.id) : selected.add(c.id); render(); } : null,
     }));
   }
   handZone.appendChild(row);
@@ -733,11 +737,19 @@ function renderPlaying() {
     chip.textContent = `Wunsch: ${round.pendingWish}`;
     bar.appendChild(chip);
   }
+
+  const myTurn = round.turn === mySeat && !round.pendingDragonGiveaway;
+  const selectedCombo = selected.size > 0 ? classify(sortHand(round.hands[mySeat].filter((c) => selected.has(c.id)))) : null;
+  const isBombSelected = !!selectedCombo && (selectedCombo.type === 'BOMB_QUAD' || selectedCombo.type === 'BOMB_STRAIGHTFLUSH');
+  if (isBombSelected && !myTurn) {
+    const chip = document.createElement('span');
+    chip.className = 'wish-chip';
+    chip.textContent = 'Bombe! Darf jederzeit geworfen werden.';
+    bar.appendChild(chip);
+  }
   const spacer = document.createElement('div');
   spacer.className = 'spacer';
   bar.appendChild(spacer);
-
-  const myTurn = round.turn === mySeat && !round.pendingDragonGiveaway;
 
   const passBtn = document.createElement('button');
   passBtn.className = 'secondary';
@@ -748,7 +760,7 @@ function renderPlaying() {
 
   const playBtn = document.createElement('button');
   playBtn.textContent = 'Karten spielen';
-  playBtn.disabled = !myTurn || selected.size === 0;
+  playBtn.disabled = round.pendingDragonGiveaway || selected.size === 0 || (!myTurn && !isBombSelected);
   playBtn.addEventListener('click', withError(async () => {
     const cards = sortHand(round.hands[mySeat].filter((c) => selected.has(c.id)));
     let wish;
