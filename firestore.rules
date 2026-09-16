@@ -82,7 +82,9 @@ service cloud.firestore {
             && isFullReset(request.resource.data.seats)
             && request.resource.data.status == 'waiting')
         );
-      allow delete: if false;
+      // Löschen: nur leere Tische (kein belegter Sitz) - kann also nie echte Spieldaten
+      // wegwerfen, ist aber genug, um verwaiste/Test-Tische aufzuräumen.
+      allow delete: if signedIn() && isFullReset(resource.data.seats);
 
       // Die Hand jedes Sitzes: die eigene uid, oder ein Mitspieler an diesem Tisch (bewusste
       // Vereinfachung fürs Online-Spielbrett - Schupfen/Züge laufen über ein für alle
