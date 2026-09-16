@@ -156,6 +156,16 @@ function cardEl(card, { selected = false, assigned = false, small = false, onCli
   if (onClick) div.addEventListener('click', onClick);
   return div;
 }
+// Firestore erlaubt kein Array direkt in einem Array (nur Array in Map/Objekt). first8/rest6
+// sind je vier Karten-Arrays - für den `newRound`-Event-Payload deshalb als Objekt mit
+// Sitzindex-Schlüsseln statt als Array-of-Arrays kodiert.
+function seatArrToMap(arr) {
+  return { 0: arr[0], 1: arr[1], 2: arr[2], 3: arr[3] };
+}
+function seatMapToArr(map) {
+  return [0, 1, 2, 3].map((i) => map[i]);
+}
+
 function comboLabel(combo) {
   if (!combo) return '';
   const names = {
@@ -183,7 +193,7 @@ function replay(first8, rest6, legacy, events) {
       if (ev.type === 'newRound') {
         if (!round.over) continue;
         matchScore = [matchScore[0] + round.result.teamScore[0], matchScore[1] + round.result.teamScore[1]];
-        round = new Round({ first8: ev.payload.first8, rest6: ev.payload.rest6 });
+        round = new Round({ first8: seatMapToArr(ev.payload.first8), rest6: seatMapToArr(ev.payload.rest6) });
         schupfenSubs = {};
         continue;
       }
@@ -651,7 +661,7 @@ function renderRoundOver() {
       playAgainClicked = true;
       render();
       const { first8, rest6 } = dealFreshRound();
-      await postEvent(gameId, mySeat, 'newRound', { first8, rest6 });
+      await postEvent(gameId, mySeat, 'newRound', { first8: seatArrToMap(first8), rest6: seatArrToMap(rest6) });
     }));
     wrap.appendChild(again);
 
