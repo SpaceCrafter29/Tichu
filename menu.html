@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tichu</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<main>
+  <h1 style="margin:0">Tichu</h1>
+  <div class="row" style="align-items: baseline;">
+    <p class="sub" id="greeting" style="margin:0">…</p>
+    <button id="logout-btn" class="secondary" style="padding: 6px 12px; font-size: 0.85rem;">Abmelden</button>
+  </div>
+
+  <div class="panel" id="room-panel" hidden>
+    <div class="row">
+      <h3 style="margin:0" id="room-name">Dein Tisch</h3>
+      <button id="leave-room" class="secondary" style="padding: 6px 12px; font-size: 0.85rem;">Tisch verlassen</button>
+    </div>
+    <p class="muted" id="room-status"></p>
+    <div class="seat-grid" id="room-seats"></div>
+  </div>
+
+  <div class="menu-cards">
+    <a href="freeplay.html" class="menu-card" id="card-freeplay">
+      <h2>Free Play</h2>
+      <p>Lockere Runden, offen für alle.</p>
+    </a>
+    <a href="tournament.html" class="menu-card" id="card-tournament">
+      <h2>Turnier</h2>
+      <p>Tische im Rahmen des Turniers.</p>
+    </a>
+  </div>
+
+  <p class="error" id="error" hidden></p>
+</main>
+
+<script type="module">
+  import { ensureSignedIn, getProfile, logout } from './lib/auth.js';
+  import { leaveTable, watchGame, watchMySeat, SEAT_LABELS } from './lib/lobby.js';
+
+  const errorEl = document.getElementById('error');
+  function showError(e) {
+    console.error(e);
+    errorEl.textContent = e && e.message ? e.message : String(e);
+    errorEl.hidden = false;
+  }
+
+  const user = await ensureSignedIn().catch((e) => { showError(e); return null; });
+  if (!user) { window.location.href = 'index.html'; throw new Error('nicht angemeldet'); }
+
+  const profile = await getProfile(user.uid);
+  if (!profile || !profile.displayName) {
+    window.location.href = 'index.html';
+    throw new Error('kein Profil');
+  }
+  document.getElementById('greeting').textContent = `Angemeldet als ${profile.displayName}.`;
+
+  document.getElementById('logout-btn').addEventListener('click', async () => {
+    await logout();
+    window.location.href = 'index.html';
+  });
+
+  let mine = JSON.parse(localStorage.getItem('tichu.mySeat') || 'null');
+  let latestGame = null;
+  let latestSeat = null;
+
+  const roomPanel = document.getElementById('room-panel');
+  const cardFreeplay = document.getElementById('card-freeplay');
+  const cardTournament = document.getElementById('card-tournament');
+
+  function renderRoom() {
+    if (!mine || !latestGame) {
+      roomPanel.hidden = true;
+      cardFreeplay.removeAttribute('aria-disabled');
+      cardTournament.removeAttribute('aria-disabled');
+      return;
+    }
+    roomPanel.hidden = false;
+    // Solange man an einem Tisch sitzt, nicht gleichzeitig in den anderen Bereich wechseln -
+    // erst verlassen (siehe leaveTable()).
+    cardFreeplay.setAttribute('aria-disabled', 'true');
+    cardTournament.setAttribute('aria-disabled', 'true');
+    document.getElementById('room-name').textContent = latestGame.name ? `Tisch ${latestGame.name}` : 'Dein Tisch';
+    const labels = { waiting: 'Warte auf Mitspieler…', dealt: 'Karten ausgeteilt - Spielansicht folgt.', playing: 'Spiel läuft.', finished: 'Spiel beendet.' };
+    let text = labels[latestGame.status] || latestGame.status;
+    if (latestSeat && latestSeat.hand) text += ` Deine Hand: ${latestSeat.hand.length} Karten.`;
+    document.getElementById('room-status').textContent = text;
+    const seatsEl = document.getElementById('room-seats');
+    seatsEl.innerHTML = '';
+    latestGame.seats.forEach((token, i) => {
+      const chip = document.createElement('div');
+      chip.className = 'seat-chip' + (token ? ' filled' : '') + (i === mine.seatIndex ? ' me' : '');
+      chip.textContent = SEAT_LABELS[i] + (token ? (i === mine.seatIndex ? ' (du)' : ' - beigetreten') : ' - frei');
+      seatsEl.appendChild(chip);
+    });
+  }
+
+  if (mine) {
+    watchGame(mine.gameId, (game) => { latestGame = game; renderRoom(); });
+    watchMySeat(mine.gameId, mine.seatIndex, (seat) => { latestSeat = seat; renderRoom(); });
+  }
+  renderRoom();
+
+  document.getElementById('leave-room').addEventListener('click', async () => {
+    if (!mine) return;
+    const { gameId, seatIndex } = mine;
+    try {
+      await leaveTable(gameId, seatIndex);
+      mine = null;
+      latestGame = null;
+      latestSeat = null;
+      localStorage.removeItem('tichu.mySeat');
+      renderRoom();
+    } catch (e) {
+      showError(e);
+    }
+  });
+</script>
+</body>
+</html>

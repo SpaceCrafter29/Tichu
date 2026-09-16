@@ -18,7 +18,7 @@
   <div class="panel" id="already-panel" hidden>
     <p id="already-text"></p>
     <div class="row" style="margin-top: 12px;">
-      <button id="continue-btn">Weiter zur Lobby</button>
+      <button id="continue-btn">Weiter zum Menü</button>
       <button id="logout-btn" class="secondary">Abmelden / anderer Name</button>
     </div>
   </div>
@@ -28,7 +28,7 @@
     <p class="muted">Nur für deine eigene Turniertabelle sichtbar - deine Mitspieler sehen ihn während eines laufenden Spiels nicht.</p>
     <input type="text" id="name" maxlength="40" placeholder="z. B. Alex" />
     <div class="row" style="margin-top: 12px;">
-      <button id="save-name">Weiter zur Lobby</button>
+      <button id="save-name">Weiter zum Menü</button>
     </div>
     <p class="error" id="name-error" hidden></p>
   </div>
@@ -59,7 +59,7 @@
   }
 
   document.getElementById('continue-btn').addEventListener('click', () => {
-    window.location.href = 'lobby.html';
+    window.location.href = 'menu.html';
   });
 
   document.getElementById('logout-btn').addEventListener('click', async () => {
@@ -77,7 +77,7 @@
     try {
       const user = await ensureSignedIn();
       await setDisplayName(user.uid, name);
-      window.location.href = 'lobby.html';
+      window.location.href = 'menu.html';
     } catch (e) {
       console.error(e);
       nameError.textContent = 'Konnte Namen nicht speichern: ' + describeError(e);

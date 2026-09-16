@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tichu - Turnier</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<main>
+  <a href="menu.html" class="back-link">&larr; Menü</a>
+  <h1 style="margin:0">Turnier</h1>
+  <div class="row" style="align-items: baseline;">
+    <p class="sub" id="greeting" style="margin:0">…</p>
+    <button id="logout-btn" class="secondary" style="padding: 6px 12px; font-size: 0.85rem;">Abmelden</button>
+  </div>
+
+  <div class="panel" id="room-panel" hidden>
+    <div class="row">
+      <h3 style="margin:0" id="room-name">Dein Tisch</h3>
+      <button id="leave-room" class="secondary" style="padding: 6px 12px; font-size: 0.85rem;">Tisch verlassen</button>
+    </div>
+    <p class="muted" id="room-status"></p>
+    <div class="seat-grid" id="room-seats"></div>
+  </div>
+
+  <div id="browse-panel">
+    <div class="panel">
+      <div class="row">
+        <h3 style="margin:0">Offene Turnier-Tische</h3>
+        <button id="create-table">Neuen Tisch erstellen</button>
+      </div>
+      <div id="table-list" style="margin-top: 12px;">
+        <p class="muted">Lade…</p>
+      </div>
+    </div>
+  </div>
+
+  <p class="error" id="error" hidden></p>
+</main>
+
+<script type="module">
+  import { mountRoomPage } from './lib/room.js';
+  mountRoomPage('tournament');
+</script>
+</body>
+</html>
