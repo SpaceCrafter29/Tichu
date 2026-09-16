@@ -15,7 +15,10 @@
   </div>
 
   <div class="panel" id="active-panel" hidden>
-    <h3 style="margin-top:0" id="active-name">Dein Tisch</h3>
+    <div class="row">
+      <h3 style="margin:0" id="active-name">Dein Tisch</h3>
+      <button id="leave-table" class="secondary" style="padding: 6px 12px; font-size: 0.85rem;">Tisch verlassen</button>
+    </div>
     <p class="muted" id="active-status"></p>
     <div class="seat-grid" id="active-seats"></div>
   </div>
@@ -40,7 +43,7 @@
 
 <script type="module">
   import { ensureSignedIn, getProfile, logout } from './lib/auth.js';
-  import { watchOpenGames, createTable, joinTable, watchGame, watchMySeat, SEAT_LABELS } from './lib/lobby.js';
+  import { watchOpenGames, createTable, joinTable, leaveTable, watchGame, watchMySeat, SEAT_LABELS } from './lib/lobby.js';
 
   const errorEl = document.getElementById('error');
   function showError(e) {
@@ -64,12 +67,27 @@
     window.location.href = 'index.html';
   });
 
-  // Session-Zustand: an welchem Tisch/Sitz nehme ich gerade teil (übersteht Reload).
+  // Session-Zustand: an welchem Tisch/Sitz nehme ich gerade teil (übersteht Reload). Immer nur
+  // EIN Tisch gleichzeitig - solange `mine` gesetzt ist, sind Beitreten/Erstellen gesperrt
+  // (siehe renderTableList/create-table unten), erst "Tisch verlassen" gibt das wieder frei.
   let mine = JSON.parse(localStorage.getItem('tichu.mySeat') || 'null');
+  let unsubActiveGame = null;
+  let unsubActiveSeat = null;
 
   function rememberSeat(gameId, seatIndex) {
     mine = { gameId, seatIndex };
     localStorage.setItem('tichu.mySeat', JSON.stringify(mine));
+  }
+
+  function forgetSeat() {
+    mine = null;
+    latestGame = null;
+    latestSeat = null;
+    localStorage.removeItem('tichu.mySeat');
+    if (unsubActiveGame) { unsubActiveGame(); unsubActiveGame = null; }
+    if (unsubActiveSeat) { unsubActiveSeat(); unsubActiveSeat = null; }
+    renderActiveGame();
+    renderTableList(lastGames);
   }
 
   const activePanel = document.getElementById('active-panel');
@@ -101,11 +119,22 @@
 
   function attachToTable(gameId, seatIndex) {
     rememberSeat(gameId, seatIndex);
-    watchGame(gameId, (game) => { latestGame = game; renderActiveGame(); });
-    watchMySeat(gameId, seatIndex, (seat) => { latestSeat = seat; renderActiveGame(); });
+    unsubActiveGame = watchGame(gameId, (game) => { latestGame = game; renderActiveGame(); renderTableList(lastGames); });
+    unsubActiveSeat = watchMySeat(gameId, seatIndex, (seat) => { latestSeat = seat; renderActiveGame(); });
   }
 
   if (mine) attachToTable(mine.gameId, mine.seatIndex);
+
+  document.getElementById('leave-table').addEventListener('click', async () => {
+    if (!mine) return;
+    const { gameId, seatIndex } = mine;
+    try {
+      await leaveTable(gameId, seatIndex);
+      forgetSeat();
+    } catch (e) {
+      showError(e);
+    }
+  });
 
   const tableListEl = document.getElementById('table-list');
   const tableListTitle = document.getElementById('table-list-title');
@@ -114,8 +143,13 @@
 
   let mode = 'freeplay';
   let unsubOpenGames = null;
+  let lastGames = [];
+  const createTableBtn = document.getElementById('create-table');
 
   function renderTableList(games) {
+    lastGames = games;
+    createTableBtn.disabled = !!mine;
+    createTableBtn.title = mine ? 'Erst den aktuellen Tisch verlassen, um einen neuen zu erstellen.' : '';
     if (games.length === 0) {
       tableListEl.innerHTML = '<p class="muted">Aktuell keine offenen Tische.</p>';
       return;
@@ -132,13 +166,17 @@
       `;
       const btn = document.createElement('button');
       btn.textContent = already ? 'Beigetreten' : 'Beitreten';
-      btn.disabled = already;
+      // Gesperrt, solange man schon an EINEM anderen Tisch sitzt - sonst könnte man
+      // mehreren Tischen gleichzeitig beitreten (siehe leaveTable() für den Ausweg).
+      btn.disabled = already || !!mine;
+      btn.title = !already && mine ? 'Erst den aktuellen Tisch verlassen, um einem anderen beizutreten.' : '';
       btn.className = 'secondary';
       btn.addEventListener('click', async () => {
         btn.disabled = true;
         try {
           const { seatIndex } = await joinTable(game.id, user.uid);
           attachToTable(game.id, seatIndex);
+          renderTableList(lastGames);
         } catch (e) {
           showError(e);
           btn.disabled = false;
@@ -163,11 +201,13 @@
   tabTournament.addEventListener('click', () => setMode('tournament'));
   setMode('freeplay');
 
-  document.getElementById('create-table').addEventListener('click', async () => {
+  createTableBtn.addEventListener('click', async () => {
+    if (mine) return;
     try {
       const gameId = await createTable(mode, 1000);
       const { seatIndex } = await joinTable(gameId, user.uid);
       attachToTable(gameId, seatIndex);
+      renderTableList(lastGames);
     } catch (e) {
       showError(e);
     }

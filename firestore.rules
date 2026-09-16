@@ -37,18 +37,41 @@ service cloud.firestore {
         && (before[3] == null || before[3] == after[3]);
     }
 
+    // Verlassen: genau der eigene, belegte Sitz wird wieder frei (null), alle anderen bleiben
+    // exakt gleich. "Eigen" heißt: die private Handkarten-Doku dieses Sitzes war (VOR dieser
+    // Transaktion - siehe Kommentar zu exists()/get() oben) auf die eigene uid angemeldet.
+    function isMySeatCleared(gameId, before, after) {
+      return
+        (before[0] != null && after[0] == null && before[1] == after[1] && before[2] == after[2] && before[3] == after[3]
+          && exists(/databases/$(database)/documents/games/$(gameId)/private/seat0)
+          && get(/databases/$(database)/documents/games/$(gameId)/private/seat0).data.claimedByUid == request.auth.uid)
+        || (before[1] != null && after[1] == null && before[0] == after[0] && before[2] == after[2] && before[3] == after[3]
+          && exists(/databases/$(database)/documents/games/$(gameId)/private/seat1)
+          && get(/databases/$(database)/documents/games/$(gameId)/private/seat1).data.claimedByUid == request.auth.uid)
+        || (before[2] != null && after[2] == null && before[0] == after[0] && before[1] == after[1] && before[3] == after[3]
+          && exists(/databases/$(database)/documents/games/$(gameId)/private/seat2)
+          && get(/databases/$(database)/documents/games/$(gameId)/private/seat2).data.claimedByUid == request.auth.uid)
+        || (before[3] != null && after[3] == null && before[0] == after[0] && before[1] == after[1] && before[2] == after[2]
+          && exists(/databases/$(database)/documents/games/$(gameId)/private/seat3)
+          && get(/databases/$(database)/documents/games/$(gameId)/private/seat3).data.claimedByUid == request.auth.uid);
+    }
+
     match /games/{gameId} {
       // Öffentlicher Spielstand (Sitz-Tokens, Stiche, Punkte, wer am Zug ist) - enthält
       // absichtlich keine uids/Anzeigenamen, ist also für alle angemeldeten Nutzer unbedenklich.
       allow read: if signedIn();
       allow create: if signedIn();
-      // Nur das Belegen eines freien Sitzes (Beitreten) - kein "isParticipant darf alles"-Fallback,
-      // sonst könnte jeder Teilnehmer per direktem Firestore-Schreibzugriff fremde Sitze
-      // überschreiben/kicken. Echte Spielzug-Updates während der Partie bekommen später eine eigene,
-      // ebenso eng gefasste Regel, sobald das Spielbrett ans Backend angebunden wird.
+      // Entweder: normales Beitreten (nur freie Sitze füllen, kein Überschreiben - kein
+      // "isParticipant darf alles"-Fallback, sonst könnte jeder Teilnehmer per direktem
+      // Firestore-Schreibzugriff fremde Sitze überschreiben). Oder: der eigene Sitz wird
+      // wieder freigegeben (Verlassen, siehe leaveTable() in lobby.js).
       allow update: if signedIn()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['seats', 'status'])
-        && seatsOnlyGrow(resource.data.seats, request.resource.data.seats);
+        && (
+          seatsOnlyGrow(resource.data.seats, request.resource.data.seats)
+          || (isMySeatCleared(gameId, resource.data.seats, request.resource.data.seats)
+            && request.resource.data.status == 'waiting')
+        );
       allow delete: if false;
 
       // Die Hand jedes Sitzes: nur die uid, die den Sitz beansprucht hat, darf sie lesen.
@@ -73,6 +96,10 @@ service cloud.firestore {
           (resource.data.hand.size() == 0
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hand']))
         );
+
+        // Verlassen: nur die eigene private Hand darf gelöscht werden, damit der Sitz danach
+        // frisch (per create()) neu beansprucht werden kann.
+        allow delete: if signedIn() && resource.data.claimedByUid == request.auth.uid;
       }
 
       // Ereignis-Log der gespielten Züge (einmal gespielte Karten sind ohnehin öffentlich).
