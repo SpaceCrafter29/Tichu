@@ -14,15 +14,26 @@ function otherTeam(t) {
 }
 
 export class Round {
-  constructor({ rng = Math.random } = {}) {
-    const deck = shuffle(createDeck(), rng);
-    const { first8, rest6 } = deal(deck);
+  // `hands`: optional vier bereits fertig ausgeteilte 14er-Hände (z. B. von einem Server/
+  // Firestore übernommen statt hier lokal gemischt) - überspringt damit automatisch das
+  // Große-Tichu-Fenster (8+6-Aufteilung), weil die Karten schon alle beim Spieler liegen.
+  constructor({ rng = Math.random, hands } = {}) {
+    let first8, rest6, dealt14;
+    if (hands) {
+      first8 = hands.map((h) => h.slice());
+      rest6 = [[], [], [], []];
+      dealt14 = true;
+    } else {
+      const deck = shuffle(createDeck(), rng);
+      ({ first8, rest6 } = deal(deck));
+      dealt14 = false;
+    }
     this.hands = first8.map((h) => h.slice()); // erst nur die ersten 8 (für die Grand-Tichu-Entscheidung)
     this.first8 = first8;
     this.rest6 = rest6;
-    this.grandTichu = [null, null, null, null]; // true/false pro Spieler, gesetzt bevor die letzten 6 gesehen werden
+    this.grandTichu = dealt14 ? [false, false, false, false] : [null, null, null, null];
     this.tichu = [false, false, false, false];
-    this.dealt14 = false;
+    this.dealt14 = dealt14;
     this.schupfenDone = false;
     this.wonPiles = [[], [], [], []];
     this.finishOrder = [];

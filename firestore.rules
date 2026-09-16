@@ -74,9 +74,13 @@ service cloud.firestore {
         );
       allow delete: if false;
 
-      // Die Hand jedes Sitzes: nur die uid, die den Sitz beansprucht hat, darf sie lesen.
+      // Die Hand jedes Sitzes: die eigene uid, oder ein Mitspieler an diesem Tisch (bewusste
+      // Vereinfachung fürs Online-Spielbrett - Schupfen/Züge laufen über ein für alle
+      // Teilnehmer sichtbares Ereignis-Log, siehe events unten; echte Geheimhaltung bräuchte
+      // pro-Empfänger-Postfächer, was für den aktuellen Umfang zu viel Aufwand ist).
       match /private/{seatDoc} {
-        allow read: if signedIn() && resource.data.claimedByUid == request.auth.uid;
+        allow read: if signedIn()
+          && (resource.data.claimedByUid == request.auth.uid || isParticipant(gameId));
 
         // Sitz beanspruchen: nur als sich selbst, mit leerer Starthand (Plätze 1-3) oder direkt
         // mit der vollen Hand (der vierte Spieler mischt und legt seine eigene Hand im selben

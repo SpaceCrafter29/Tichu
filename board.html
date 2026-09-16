@@ -1,0 +1,512 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tichu - Spielbrett</title>
+<link rel="stylesheet" href="style.css" />
+<style>
+  body { padding: 20px 14px 60px; }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  h1 { font-size: 1.3rem; margin: 0 0 2px; }
+  .topbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
+  .error-banner { background: #3a1418; border: 1px solid #6b2229; color: #ff9aa2; padding: 10px 14px; border-radius: 8px; margin-bottom: 14px; font-size: 0.9rem; }
+
+  .seats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-bottom: 16px; }
+  .seat-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+  .seat-panel.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .seat-panel.me { background: rgba(255, 138, 52, 0.1); }
+  .seat-panel .head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+  .seat-panel .name { font-weight: 700; font-size: 0.95rem; }
+  .seat-panel .meta { font-size: 0.78rem; color: var(--muted); }
+  .flair { display: inline-block; font-size: 0.7rem; padding: 1px 6px; border-radius: 999px; margin-left: 6px; }
+  .flair.gt { background: #7c3aed33; color: #c4b5fd; }
+  .flair.t { background: #d9770633; color: #fdba74; }
+  .flair.place { background: #16a34a33; color: #86efac; }
+  .seat-tichu-btn { font-size: 0.72rem; padding: 4px 8px; margin-top: 6px; background: transparent; border: 1px solid var(--border); color: var(--text); border-radius: 6px; }
+
+  .cards-row { display: flex; flex-wrap: wrap; gap: 6px; }
+
+  .pcard { width: 52px; height: 74px; border-radius: 7px; background: #f4efe2; border: 1px solid #d9d0ba; position: relative; box-shadow: 0 2px 6px rgba(0,0,0,0.35); cursor: default; flex-shrink: 0; }
+  .pcard.small { width: 40px; height: 56px; }
+  .pcard.clickable { cursor: pointer; }
+  .pcard.selected { box-shadow: 0 0 0 3px var(--accent), 0 4px 10px rgba(0,0,0,0.4); transform: translateY(-4px); }
+  .pcard.assigned { box-shadow: 0 0 0 3px var(--accent); }
+  .pcard.special { background: #e8c471; border-color: #b8862f; }
+  .pcard .corner { position: absolute; font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 700; font-size: 12px; line-height: 1; }
+  .pcard.small .corner { font-size: 9px; }
+  .pcard .corner.tl { top: 4px; left: 5px; }
+  .pcard .corner.br { bottom: 4px; right: 5px; transform: rotate(180deg); }
+  .pcard .icon { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); }
+
+  .table-area { background: radial-gradient(closest-side, #2a2a2a, #141414 78%); border-radius: 20px; padding: 24px; margin-bottom: 16px; min-height: 140px; }
+  .trick-label { font-size: 0.85rem; color: var(--muted); margin-bottom: 10px; text-align: center; }
+  .trick-cards { display: flex; justify-content: center; gap: 6px; flex-wrap: wrap; }
+
+  .hand-zone { margin-bottom: 12px; }
+  .hand-zone .label { font-size: 0.85rem; color: var(--muted); margin-bottom: 6px; }
+
+  .actionbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
+  .actionbar .spacer { flex: 1; }
+  .wish-chip { font-size: 0.8rem; background: #141414; border: 1px solid var(--border); border-radius: 999px; padding: 5px 12px; }
+
+  .targets { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+  .target-slot { background: var(--panel); border: 2px solid var(--border); border-radius: 10px; padding: 8px 10px; min-width: 100px; text-align: center; cursor: pointer; }
+  .target-slot .t-label { font-size: 0.78rem; color: var(--muted); margin-bottom: 6px; }
+  .target-slot .t-card { min-height: 74px; display: flex; align-items: center; justify-content: center; }
+
+  .result-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+  .result-team { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+  .result-team h3 { margin: 0 0 8px; font-size: 1rem; }
+  .result-team .row { padding: 4px 0; font-size: 0.88rem; }
+  .result-team .total { font-size: 1.4rem; font-weight: 700; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <div>
+      <a href="menu.html" class="back-link">&larr; Menü</a>
+      <h1 id="title">Tichu</h1>
+      <p class="sub" id="subtitle" style="margin:0">Lade…</p>
+    </div>
+  </div>
+  <div id="error"></div>
+  <div id="app"></div>
+</div>
+
+<script type="module">
+import { ensureSignedIn, getProfile } from './lib/auth.js';
+import { getAllHands, postEvent, watchEvents, watchGame, SEAT_LABELS } from './lib/lobby.js';
+import { Round, teamOf } from './engine/game.js';
+import { sortHand, cardPoints } from './engine/cards.js';
+
+// --- Auth/Setup ------------------------------------------------------------
+const errorEl = document.getElementById('error');
+function fatal(msg) {
+  errorEl.innerHTML = `<div class="error-banner">${msg}</div>`;
+}
+
+const params = new URLSearchParams(location.search);
+const gameId = params.get('g');
+const mine = JSON.parse(localStorage.getItem('tichu.mySeat') || 'null');
+
+if (!gameId || !mine || mine.gameId !== gameId) {
+  window.location.href = 'menu.html';
+  throw new Error('kein passender Sitz für diesen Tisch');
+}
+const mySeat = mine.seatIndex;
+
+const user = await ensureSignedIn().catch((e) => { fatal(String(e)); return null; });
+if (!user) throw new Error('nicht angemeldet');
+const profile = await getProfile(user.uid);
+if (!profile || !profile.displayName) { window.location.href = 'index.html'; throw new Error('kein Profil'); }
+
+let initialHands = null;
+let gameMeta = null;
+watchGame(gameId, (game) => {
+  gameMeta = game;
+  if (game) {
+    document.getElementById('title').textContent = game.name ? `Tisch ${game.name}` : 'Tichu';
+    document.getElementById('subtitle').textContent = `Ziel ${game.target} Punkte`;
+  }
+});
+
+// --- Kartendarstellung (siehe play.html - dieselbe Optik) -------------------
+const RANK_LABEL = { 11: 'B', 12: 'D', 13: 'K', 14: 'A' };
+const SUIT_ICON = {
+  Jade:   { color: '#2E6B4A', fill: '#3E8F63', path: 'M16 3 L25 13 L16 29 L7 13 Z' },
+  Schwert:{ color: '#151A21', fill: '#232B36', path: 'M15 2 L17 2 L17 17 L20 17 L20 19 L12 19 L12 17 L15 17 Z M12 21 L20 21 L20 23 L18 23 L18 28 L14 28 L14 23 L12 23 Z' },
+  Pagode: { color: '#25407A', fill: '#3F6FC4', path: 'M16 3 L21 9 L11 9 Z M9 11 L23 11 L19 17 L13 17 Z M11 19 L21 19 L21 28 L11 28 Z' },
+  Stern:  { color: '#8F2E26', fill: '#D94A3E', path: 'M16 2 L18.5 10.5 L27 8 L20.5 14.5 L27 21 L18.5 18.5 L16 27 L13.5 18.5 L5 21 L11.5 14.5 L5 8 L13.5 10.5 Z' },
+};
+const AMBER = '#8A5A16';
+const SPECIAL_ICON = {
+  MAHJONG: { path: 'M11 4 L21 4 L21 7 L18 7 L18 25 L21 25 L21 28 L11 28 L11 25 L14 25 L14 7 L11 7 Z', label: 'I' },
+  PHOENIX: { path: 'M16 29c-4.4 0-8-3.6-8-8 0-5 3.6-9.7 8-16.6 1.3 3.7 0.4 6.6 2.4 8.2C21.3 9.3 22.6 6 22 2c3 4.9 4 11.3 1.3 16.6-1.3 5-3.6 8.6-6.7 8.6z', label: 'PH' },
+  DOG:     { path: 'M12 11a2.6 2.6 0 1 0 0.01 0z M20 11a2.6 2.6 0 1 0 0.01 0z M8.5 16a2.3 2.3 0 1 0 0.01 0z M23.5 16a2.3 2.3 0 1 0 0.01 0z M16 18a4.6 4.6 0 1 0 0.01 0z', label: 'HU' },
+  DRAGON:  { path: 'M6 27c-1-6 2-10 7-11-2-2-2-5 0-7 3 2 3 5 1 7 5-1 8 2 8 6-3 0-5-2-6-4-1 3-4 5-8 6-1 0-2 2-2 3z M20 9c1-1.5 3-2 5-1-1 1.5-3 2-5 1z', label: 'DR' },
+};
+function labelFor(card) {
+  if (card.special) return SPECIAL_ICON[card.special].label;
+  return RANK_LABEL[card.rank] || String(card.rank);
+}
+function cardEl(card, { selected = false, assigned = false, small = false, onClick = null } = {}) {
+  const div = document.createElement('div');
+  div.className = 'pcard' + (card.special ? ' special' : '') + (small ? ' small' : '') + (selected ? ' selected' : '') + (assigned ? ' assigned' : '') + (onClick ? ' clickable' : '');
+  const label = labelFor(card);
+  const icon = card.special ? SPECIAL_ICON[card.special] : SUIT_ICON[card.suit];
+  const color = card.special ? AMBER : icon.color;
+  const fill = card.special ? AMBER : icon.fill;
+  div.innerHTML = `
+    <div class="corner tl" style="color:${color}">${label}</div>
+    <svg class="icon" viewBox="0 0 32 32" width="26" height="26"><path d="${icon.path}" fill="${fill}" stroke="${color}" stroke-width="0.6"/></svg>
+    <div class="corner br" style="color:${color}">${label}</div>
+  `;
+  if (onClick) div.addEventListener('click', onClick);
+  return div;
+}
+function comboLabel(combo) {
+  if (!combo) return '';
+  const names = {
+    SINGLE: 'Einzel', PAIR: 'Paar', TRIPLE: 'Drilling', FULLHOUSE: 'Full House',
+    STAIRS: 'Treppe', STRAIGHT: 'Straße', BOMB_QUAD: 'Vierling-Bombe', BOMB_STRAIGHTFLUSH: 'Straßenbombe', DOG: 'Hund',
+  };
+  return names[combo.type] || combo.type;
+}
+
+// --- Ereignis-Log -> Runde ---------------------------------------------------
+// Jeder Teilnehmer baut lokal aus derselben, geordneten Ereignisliste dieselbe Runde nach
+// (dieselbe Engine wie play.html). Kein serverseitiges Prüfen der Zug-Gültigkeit - ungültige/
+// verspätete Ereignisse werden beim Nachspielen einfach übersprungen (siehe firestore.rules).
+function replay(hands, events) {
+  const round = new Round({ hands });
+  const schupfenSubs = {};
+  for (const ev of events) {
+    try {
+      applyEvent(round, ev, schupfenSubs);
+    } catch (e) {
+      console.warn('Ereignis übersprungen:', ev, e.message);
+    }
+  }
+  return round;
+}
+function applyEvent(round, ev, schupfenSubs) {
+  const { seatIndex, type, payload } = ev;
+  if (type === 'tichu') {
+    round.callTichu(seatIndex);
+  } else if (type === 'schupfenSubmit') {
+    schupfenSubs[seatIndex] = payload.gives;
+    if (!round.schupfenDone && [0, 1, 2, 3].every((i) => schupfenSubs[i])) {
+      const matrix = [0, 1, 2, 3].map((i) => {
+        const m = {};
+        for (const [toStr, cardId] of Object.entries(schupfenSubs[i])) {
+          const card = round.hands[i].find((c) => c.id === cardId);
+          if (!card) throw new Error('Karte für Schupfen nicht gefunden');
+          m[toStr] = card;
+        }
+        return m;
+      });
+      round.schupfen(matrix);
+    }
+  } else if (type === 'play') {
+    const cards = payload.cardIds.map((id) => round.hands[seatIndex].find((c) => c.id === id));
+    if (cards.some((c) => !c)) throw new Error('gespielte Karte nicht auf der Hand');
+    round.play(seatIndex, cards, payload.wish != null ? { wish: payload.wish } : {});
+  } else if (type === 'pass') {
+    round.pass(seatIndex);
+  } else if (type === 'giveDragonTrick') {
+    round.giveDragonTrick(payload.toPlayerIdx);
+  }
+}
+
+// --- Zustand -----------------------------------------------------------
+let round = null;
+let events = [];
+let selected = new Set();
+let schupfenDraft = {}; // {toSeat: cardId}
+let errorMsg = '';
+
+function withError(fn) {
+  return async (...args) => {
+    try {
+      await fn(...args);
+      errorMsg = '';
+    } catch (e) {
+      errorMsg = e.message || String(e);
+    }
+    render();
+  };
+}
+
+async function start() {
+  initialHands = await getAllHands(gameId).catch((e) => { fatal('Konnte Hände nicht laden: ' + e.message); return null; });
+  if (!initialHands) return;
+  watchEvents(gameId, (evs) => {
+    events = evs;
+    round = replay(initialHands, events);
+    render();
+  });
+}
+start();
+
+// --- Renderer ------------------------------------------------------------
+function render() {
+  const errEl = document.getElementById('error');
+  errEl.innerHTML = errorMsg ? `<div class="error-banner">${errorMsg}</div>` : '';
+  const app = document.getElementById('app');
+  app.innerHTML = '';
+  if (!round) { app.innerHTML = '<p class="muted">Lade Spielstand…</p>'; return; }
+  if (round.over) app.appendChild(renderRoundOver());
+  else if (!round.schupfenDone) app.appendChild(renderSchupfen());
+  else app.appendChild(renderPlaying());
+}
+
+function renderSchupfen() {
+  const wrap = document.createElement('div');
+  const others = [0, 1, 2, 3].filter((s) => s !== mySeat);
+
+  const status = document.createElement('p');
+  status.className = 'sub';
+  const doneCount = events.filter((e) => e.type === 'schupfenSubmit').length;
+  status.textContent = `Schupfen: ${doneCount}/4 Spieler bereit.`;
+  wrap.appendChild(status);
+
+  const alreadySubmitted = events.some((e) => e.type === 'schupfenSubmit' && e.seatIndex === mySeat);
+
+  if (alreadySubmitted) {
+    const p = document.createElement('p');
+    p.className = 'muted';
+    p.textContent = 'Du hast deine Karten abgegeben - warte auf die anderen…';
+    wrap.appendChild(p);
+    return wrap;
+  }
+
+  const hint = document.createElement('p');
+  hint.className = 'sub';
+  hint.style.margin = '0 0 10px';
+  hint.textContent = 'Karte antippen, dann Ziel antippen. Nochmal auf ein belegtes Ziel tippen entfernt die Zuordnung.';
+  wrap.appendChild(hint);
+
+  let pendingCardId = null;
+  const targets = document.createElement('div');
+  targets.className = 'targets';
+  others.forEach((targetSeat) => {
+    const slot = document.createElement('div');
+    slot.className = 'target-slot';
+    slot.innerHTML = `<div class="t-label">an ${SEAT_LABELS[targetSeat]}</div>`;
+    const cardHolder = document.createElement('div');
+    cardHolder.className = 't-card';
+    const assignedId = schupfenDraft[targetSeat];
+    const assignedCard = assignedId != null ? round.hands[mySeat].find((c) => c.id === assignedId) : null;
+    if (assignedCard) cardHolder.appendChild(cardEl(assignedCard, { assigned: true }));
+    else cardHolder.innerHTML = '<span class="muted" style="font-size:0.75rem">leer</span>';
+    slot.appendChild(cardHolder);
+    slot.addEventListener('click', () => {
+      if (pendingCardId != null) {
+        for (const k of Object.keys(schupfenDraft)) if (schupfenDraft[k] === pendingCardId) delete schupfenDraft[k];
+        schupfenDraft[targetSeat] = pendingCardId;
+        pendingCardId = null;
+      } else if (schupfenDraft[targetSeat] != null) {
+        delete schupfenDraft[targetSeat];
+      }
+      render();
+    });
+    targets.appendChild(slot);
+  });
+  wrap.appendChild(targets);
+
+  const handLabel = document.createElement('div');
+  handLabel.className = 'sub';
+  handLabel.style.margin = '0 0 6px';
+  handLabel.textContent = 'Deine Hand:';
+  wrap.appendChild(handLabel);
+
+  const assignedIds = new Set(Object.values(schupfenDraft));
+  const row = document.createElement('div');
+  row.className = 'cards-row';
+  for (const c of sortHand(round.hands[mySeat])) {
+    row.appendChild(cardEl(c, {
+      selected: pendingCardId === c.id,
+      assigned: assignedIds.has(c.id),
+      onClick: () => {
+        if (assignedIds.has(c.id)) return;
+        pendingCardId = pendingCardId === c.id ? null : c.id;
+        render();
+      },
+    }));
+  }
+  wrap.appendChild(row);
+
+  const allReady = others.every((s) => schupfenDraft[s] != null);
+  const submit = document.createElement('button');
+  submit.style.marginTop = '16px';
+  submit.textContent = 'Schupfen abgeben';
+  submit.disabled = !allReady;
+  submit.addEventListener('click', withError(async () => {
+    await postEvent(gameId, mySeat, 'schupfenSubmit', { gives: schupfenDraft });
+  }));
+  wrap.appendChild(submit);
+  return wrap;
+}
+
+function renderPlaying() {
+  const wrap = document.createElement('div');
+
+  if (round.pendingDragonGiveaway) {
+    const overlay = document.createElement('div');
+    overlay.className = 'panel';
+    overlay.style.borderColor = '#d97706';
+    const winner = round.pendingDragonGiveaway.winnerIdx;
+    if (winner === mySeat) {
+      const opponents = [0, 1, 2, 3].filter((s) => teamOf(s) !== teamOf(winner));
+      overlay.innerHTML = `<p><b>Du hast den Drachen gewonnen.</b> An welchen Gegner geht der Stich?</p>`;
+      const row = document.createElement('div');
+      row.className = 'row';
+      for (const s of opponents) {
+        const btn = document.createElement('button');
+        btn.textContent = SEAT_LABELS[s];
+        btn.addEventListener('click', withError(async () => {
+          await postEvent(gameId, mySeat, 'giveDragonTrick', { toPlayerIdx: s });
+        }));
+        row.appendChild(btn);
+      }
+      overlay.appendChild(row);
+    } else {
+      overlay.innerHTML = `<p>${SEAT_LABELS[winner]} hat den Drachen gewonnen und vergibt den Stich…</p>`;
+    }
+    wrap.appendChild(overlay);
+  }
+
+  const seats = document.createElement('div');
+  seats.className = 'seats';
+  for (let i = 0; i < 4; i++) {
+    const panel = document.createElement('div');
+    panel.className = 'seat-panel' + (i === round.turn ? ' active' : '') + (i === mySeat ? ' me' : '');
+    const place = round.finishOrder.indexOf(i);
+    panel.innerHTML = `
+      <div class="head">
+        <span class="name">${SEAT_LABELS[i]}${i === mySeat ? ' (du)' : ''}${i === round.turn ? ' 🎯' : ''}</span>
+        <span class="meta">${round.hands[i].length} Karten</span>
+      </div>
+      <div>
+        ${round.tichu[i] ? '<span class="flair t">Tichu</span>' : ''}
+        ${place >= 0 ? `<span class="flair place">Platz ${place + 1}</span>` : ''}
+      </div>
+    `;
+    if (i === mySeat && round.playedAny && !round.playedAny[i] && !round.tichu[i] && round.active.has(i)) {
+      const tbtn = document.createElement('button');
+      tbtn.className = 'seat-tichu-btn';
+      tbtn.textContent = 'Tichu ansagen';
+      tbtn.addEventListener('click', withError(async () => { await postEvent(gameId, mySeat, 'tichu', {}); }));
+      panel.appendChild(tbtn);
+    }
+    seats.appendChild(panel);
+  }
+  wrap.appendChild(seats);
+
+  const table = document.createElement('div');
+  table.className = 'table-area';
+  const label = document.createElement('div');
+  label.className = 'trick-label';
+  if (round.currentTrick.combo === null) {
+    label.textContent = `${SEAT_LABELS[round.turn]} eröffnet den Stich`;
+  } else {
+    label.textContent = `Zuletzt: ${SEAT_LABELS[round.currentTrick.winnerIdx]} spielt ${comboLabel(round.currentTrick.combo)}`;
+  }
+  table.appendChild(label);
+  const trickCards = document.createElement('div');
+  trickCards.className = 'trick-cards';
+  for (const c of round.currentTrick.cardsInTrick) trickCards.appendChild(cardEl(c, { small: true }));
+  table.appendChild(trickCards);
+  wrap.appendChild(table);
+
+  const handZone = document.createElement('div');
+  handZone.className = 'hand-zone';
+  const handLabel = document.createElement('div');
+  handLabel.className = 'label';
+  handLabel.textContent = round.turn === mySeat ? 'Deine Hand (du bist am Zug):' : 'Deine Hand:';
+  handZone.appendChild(handLabel);
+  const row = document.createElement('div');
+  row.className = 'cards-row';
+  for (const c of sortHand(round.hands[mySeat])) {
+    row.appendChild(cardEl(c, {
+      selected: selected.has(c.id),
+      onClick: round.turn === mySeat ? () => { selected.has(c.id) ? selected.delete(c.id) : selected.add(c.id); render(); } : null,
+    }));
+  }
+  handZone.appendChild(row);
+  wrap.appendChild(handZone);
+
+  const bar = document.createElement('div');
+  bar.className = 'actionbar';
+  if (round.pendingWish != null) {
+    const chip = document.createElement('span');
+    chip.className = 'wish-chip';
+    chip.textContent = `Wunsch: ${round.pendingWish}`;
+    bar.appendChild(chip);
+  }
+  const spacer = document.createElement('div');
+  spacer.className = 'spacer';
+  bar.appendChild(spacer);
+
+  const myTurn = round.turn === mySeat && !round.pendingDragonGiveaway;
+
+  const passBtn = document.createElement('button');
+  passBtn.className = 'secondary';
+  passBtn.textContent = 'Passen';
+  passBtn.disabled = !myTurn || round.currentTrick.combo === null;
+  passBtn.addEventListener('click', withError(async () => { await postEvent(gameId, mySeat, 'pass', {}); }));
+  bar.appendChild(passBtn);
+
+  const playBtn = document.createElement('button');
+  playBtn.textContent = 'Karten spielen';
+  playBtn.disabled = !myTurn || selected.size === 0;
+  playBtn.addEventListener('click', withError(async () => {
+    const cards = round.hands[mySeat].filter((c) => selected.has(c.id));
+    let wish;
+    const isMahjongLead = cards.length === 1 && cards[0].special === 'MAHJONG' && round.currentTrick.combo === null;
+    if (isMahjongLead) {
+      const input = window.prompt('Wunsch ansagen (2-14), leer lassen für keinen Wunsch:');
+      if (input && input.trim() !== '') {
+        const n = Number(input);
+        if (!Number.isNaN(n)) wish = n;
+      }
+    }
+    await postEvent(gameId, mySeat, 'play', { cardIds: cards.map((c) => c.id), wish });
+    selected = new Set();
+  }));
+  bar.appendChild(playBtn);
+  wrap.appendChild(bar);
+
+  return wrap;
+}
+
+function renderRoundOver() {
+  const wrap = document.createElement('div');
+  const r = round.result;
+  const heading = document.createElement('h2');
+  heading.textContent = r.doubleWin ? 'Doppelsieg!' : 'Rundenende';
+  wrap.appendChild(heading);
+
+  let lastPlaceSeat = null;
+  let lastPlaceHandPoints = 0;
+  if (!r.doubleWin) {
+    lastPlaceSeat = [...round.active][0];
+    lastPlaceHandPoints = round.hands[lastPlaceSeat].reduce((sum, c) => sum + cardPoints(c), 0);
+  }
+
+  const grid = document.createElement('div');
+  grid.className = 'result-grid';
+  const teamNames = ['Süd - Nord', 'West - Ost'];
+  const teamSeats = [[2, 0], [3, 1]];
+  for (let t = 0; t < 2; t++) {
+    const box = document.createElement('div');
+    box.className = 'result-team';
+    let rows = '';
+    for (const s of teamSeats[t]) {
+      rows += `<div class="row">${SEAT_LABELS[s]}${s === mySeat ? ' (du)' : ''}: ${r.pointsPerPlayer[s]} Punkte${r.tichuBonus[s] ? ` (${r.tichuBonus[s] > 0 ? '+' : ''}${r.tichuBonus[s]} Tichu)` : ''}</div>`;
+    }
+    if (lastPlaceSeat != null && !teamSeats[t].includes(lastPlaceSeat) && lastPlaceHandPoints !== 0) {
+      rows += `<div class="row">Restkarten von ${SEAT_LABELS[lastPlaceSeat]}: ${lastPlaceHandPoints} Punkte</div>`;
+    }
+    box.innerHTML = `<h3>Team ${teamNames[t]}</h3>${rows}<div class="total">${r.teamScore[t]} Punkte</div>`;
+    grid.appendChild(box);
+  }
+  wrap.appendChild(grid);
+
+  const note = document.createElement('p');
+  note.className = 'muted';
+  note.textContent = 'Für eine weitere Runde aktuell einen neuen Tisch erstellen - automatische Rundenfolge folgt später.';
+  wrap.appendChild(note);
+
+  const btn = document.createElement('button');
+  btn.textContent = 'Zurück zum Menü';
+  btn.addEventListener('click', () => { window.location.href = 'menu.html'; });
+  wrap.appendChild(btn);
+
+  return wrap;
+}
+</script>
+</body>
+</html>

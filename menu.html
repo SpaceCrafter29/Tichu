@@ -84,7 +84,7 @@
     cardFreeplay.setAttribute('aria-disabled', 'true');
     cardTournament.setAttribute('aria-disabled', 'true');
     document.getElementById('room-name').textContent = latestGame.name ? `Tisch ${latestGame.name}` : 'Dein Tisch';
-    const labels = { waiting: 'Warte auf Mitspieler…', dealt: 'Karten ausgeteilt - Spielansicht folgt.', playing: 'Spiel läuft.', finished: 'Spiel beendet.' };
+    const labels = { waiting: 'Warte auf Mitspieler…', dealt: 'Karten ausgeteilt.', playing: 'Spiel läuft.', finished: 'Spiel beendet.' };
     let text = labels[latestGame.status] || latestGame.status;
     if (latestSeat && latestSeat.hand) text += ` Deine Hand: ${latestSeat.hand.length} Karten.`;
     document.getElementById('room-status').textContent = text;
@@ -96,6 +96,20 @@
       chip.textContent = SEAT_LABELS[i] + (token ? (i === mine.seatIndex ? ' (du)' : ' - beigetreten') : ' - frei');
       seatsEl.appendChild(chip);
     });
+
+    let openBoardBtn = document.getElementById('open-board-btn');
+    if (latestGame.status !== 'waiting') {
+      if (!openBoardBtn) {
+        openBoardBtn = document.createElement('button');
+        openBoardBtn.id = 'open-board-btn';
+        openBoardBtn.style.marginTop = '10px';
+        roomPanel.appendChild(openBoardBtn);
+      }
+      openBoardBtn.textContent = 'Zum Spielbrett';
+      openBoardBtn.onclick = () => { window.location.href = `board.html?g=${mine.gameId}`; };
+    } else if (openBoardBtn) {
+      openBoardBtn.remove();
+    }
   }
 
   if (mine) {
