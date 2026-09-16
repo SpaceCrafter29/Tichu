@@ -205,6 +205,7 @@ let round = null;
 let events = [];
 let selected = new Set();
 let schupfenDraft = {}; // {toSeat: cardId}
+let schupfenPendingCardId = null; // gerade angetippte, noch nicht zugeordnete Karte
 let errorMsg = '';
 
 function withError(fn) {
@@ -268,7 +269,6 @@ function renderSchupfen() {
   hint.textContent = 'Karte antippen, dann Ziel antippen. Nochmal auf ein belegtes Ziel tippen entfernt die Zuordnung.';
   wrap.appendChild(hint);
 
-  let pendingCardId = null;
   const targets = document.createElement('div');
   targets.className = 'targets';
   others.forEach((targetSeat) => {
@@ -283,10 +283,10 @@ function renderSchupfen() {
     else cardHolder.innerHTML = '<span class="muted" style="font-size:0.75rem">leer</span>';
     slot.appendChild(cardHolder);
     slot.addEventListener('click', () => {
-      if (pendingCardId != null) {
-        for (const k of Object.keys(schupfenDraft)) if (schupfenDraft[k] === pendingCardId) delete schupfenDraft[k];
-        schupfenDraft[targetSeat] = pendingCardId;
-        pendingCardId = null;
+      if (schupfenPendingCardId != null) {
+        for (const k of Object.keys(schupfenDraft)) if (schupfenDraft[k] === schupfenPendingCardId) delete schupfenDraft[k];
+        schupfenDraft[targetSeat] = schupfenPendingCardId;
+        schupfenPendingCardId = null;
       } else if (schupfenDraft[targetSeat] != null) {
         delete schupfenDraft[targetSeat];
       }
@@ -307,11 +307,11 @@ function renderSchupfen() {
   row.className = 'cards-row';
   for (const c of sortHand(round.hands[mySeat])) {
     row.appendChild(cardEl(c, {
-      selected: pendingCardId === c.id,
+      selected: schupfenPendingCardId === c.id,
       assigned: assignedIds.has(c.id),
       onClick: () => {
         if (assignedIds.has(c.id)) return;
-        pendingCardId = pendingCardId === c.id ? null : c.id;
+        schupfenPendingCardId = schupfenPendingCardId === c.id ? null : c.id;
         render();
       },
     }));

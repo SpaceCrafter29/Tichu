@@ -56,6 +56,13 @@ service cloud.firestore {
           && get(/databases/$(database)/documents/games/$(gameId)/private/seat3).data.claimedByUid == request.auth.uid);
     }
 
+    // Tisch-Reset: alle vier Sitze auf einmal räumen. Für einen bereits (teil-)ausgeteilten
+    // Tisch, den jemand verlässt - ein einzelner Nachrücker könnte mit den alten Händen der
+    // übrigen drei nichts anfangen, siehe leaveTable() in lobby.js.
+    function isFullReset(seats) {
+      return seats[0] == null && seats[1] == null && seats[2] == null && seats[3] == null;
+    }
+
     match /games/{gameId} {
       // Öffentlicher Spielstand (Sitz-Tokens, Stiche, Punkte, wer am Zug ist) - enthält
       // absichtlich keine uids/Anzeigenamen, ist also für alle angemeldeten Nutzer unbedenklich.
@@ -70,6 +77,9 @@ service cloud.firestore {
         && (
           seatsOnlyGrow(resource.data.seats, request.resource.data.seats)
           || (isMySeatCleared(gameId, resource.data.seats, request.resource.data.seats)
+            && request.resource.data.status == 'waiting')
+          || (isParticipant(gameId)
+            && isFullReset(request.resource.data.seats)
             && request.resource.data.status == 'waiting')
         );
       allow delete: if false;
@@ -101,9 +111,12 @@ service cloud.firestore {
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hand']))
         );
 
-        // Verlassen: nur die eigene private Hand darf gelöscht werden, damit der Sitz danach
-        // frisch (per create()) neu beansprucht werden kann.
-        allow delete: if signedIn() && resource.data.claimedByUid == request.auth.uid;
+        // Verlassen: die eigene private Hand darf immer gelöscht werden. Beim Tisch-Reset
+        // (siehe isFullReset oben) darf ein Teilnehmer auch die private Hand der anderen drei
+        // löschen - sonst blieben deren Handkarten-Dokumente nicht-leer und blockierten einen
+        // künftigen Beitritt (siehe Kommentar bei leaveTable() in lobby.js).
+        allow delete: if signedIn()
+          && (resource.data.claimedByUid == request.auth.uid || isParticipant(gameId));
       }
 
       // Ereignis-Log der gespielten Züge (einmal gespielte Karten sind ohnehin öffentlich).
