@@ -77,7 +77,7 @@
 
 <script type="module">
 import { ensureSignedIn, getProfile } from './lib/auth.js';
-import { getAllHands, dealFreshRound, postEvent, watchEvents, watchGame, SEAT_LABELS } from './lib/lobby.js';
+import { getAllHands, dealFreshRound, postEvent, watchEvents, watchGame, leaveTable, SEAT_LABELS } from './lib/lobby.js';
 import { Round, teamOf } from './engine/game.js';
 import { sortHand, cardPoints } from './engine/cards.js';
 import { classify, canBeat } from './engine/combos.js';
@@ -105,11 +105,28 @@ if (!profile || !profile.displayName) { window.location.href = 'index.html'; thr
 
 let gameMeta = null;
 let started = false;
+let lastKnownStatus = null;
+let redirectingHome = false;
 watchGame(gameId, (game) => {
   gameMeta = game;
   if (game) {
     document.getElementById('title').textContent = game.name ? `Tisch ${game.name}` : 'Tichu';
     document.getElementById('subtitle').textContent = `Ziel ${game.target} Punkte`;
+    // Springt der Tisch, NACHDEM er schon lief, wieder auf 'waiting' zurück, hat jemand ihn
+    // zurückgesetzt (manuell verlassen oder wegen Inaktivität gekickt, siehe handleTimeout) -
+    // alle Clients (auch der gekickte selbst, falls dessen Tab noch offen ist) müssen dann
+    // zurück ins Menü, der eigene Sitz ist nicht mehr gültig.
+    if (started && !redirectingHome && lastKnownStatus && lastKnownStatus !== 'waiting' && game.status === 'waiting') {
+      redirectingHome = true;
+      const lastKick = [...events].reverse().find((e) => e.type === 'kicked');
+      const notice = lastKick
+        ? `Der Tisch wurde zurückgesetzt: ${SEAT_LABELS[lastKick.seatIndex]} wurde wegen Inaktivität vom Tisch entfernt.`
+        : 'Der Tisch wurde zurückgesetzt.';
+      localStorage.removeItem('tichu.mySeat');
+      window.location.href = `menu.html?notice=${encodeURIComponent(notice)}`;
+      return;
+    }
+    lastKnownStatus = game.status;
   }
   // Erst starten, sobald der Tisch WIRKLICH ausgeteilt hat - vorher existieren die privaten
   // Sitz-Dokumente noch gar nicht alle, das Lesen würde an der Regel scheitern (sieht als
@@ -202,7 +219,7 @@ function replay(first8, rest6, legacy, events) {
       console.warn('Ereignis übersprungen:', ev, e.message);
     }
   }
-  return { round, matchScore };
+  return { round, matchScore, schupfenSubs };
 }
 function applyEvent(round, ev, schupfenSubs) {
   const { seatIndex, type, payload } = ev;
@@ -247,6 +264,139 @@ let schupfenPendingCardId = null; // gerade angetippte, noch nicht zugeordnete K
 let errorMsg = '';
 let autoPlaying = false;
 let playAgainClicked = false;
+let currentSchupfenSubs = {};
+
+// --- Zugtimer: 1 Minute pro Aktion, sonst automatischer Zug/Kick wegen Inaktivität ----------
+// Jeder Client verfolgt lokal, wer gerade "dran" ist (Grand-Tichu-Entscheidung, Schupfen,
+// Drachenstich-Vergabe oder ein normaler Spielzug) und wie lange schon. Läuft die Zeit ab,
+// postet DIESER Client (nicht der Betroffene selbst - siehe seat !== mySeat unten) einen
+// automatischen Zug an dessen Stelle. Mehrere Clients können dabei gleichzeitig auslösen -
+// harmlos, verspätete/ungültige Zweitversuche werden beim Nachspielen einfach übersprungen
+// (siehe replay()/applyEvent() oben). Nach drei automatischen Spielzügen IN FOLGE innerhalb
+// derselben Runde gilt der Platz als aufgegeben: der ganze Tisch wird zurückgesetzt (dieselbe
+// Mechanik wie beim manuellen Verlassen eines laufenden Spiels, siehe leaveTable()).
+const TURN_TIMEOUT_MS = 60 * 1000;
+const STRIKE_LIMIT = 3;
+let turnTimerActor = null;
+let turnTimerStartedAt = null;
+let turnRemainingSec = null;
+let kicking = false;
+
+// Wer muss gerade handeln? null, solange niemand konkret am Zug ist (z. B. Rundenende-Screen).
+function actingSeat() {
+  if (!round) return null;
+  if (!round.dealt14) {
+    const idx = round.grandTichu.findIndex((v) => v === null);
+    return idx === -1 ? null : idx;
+  }
+  if (round.over) return null;
+  if (!round.schupfenDone) {
+    const idx = [0, 1, 2, 3].find((i) => !currentSchupfenSubs[i]);
+    return idx === undefined ? null : idx;
+  }
+  if (round.pendingDragonGiveaway) return round.pendingDragonGiveaway.winnerIdx;
+  return round.turn;
+}
+
+// Ein möglichst harmloser automatischer Zug für `seat`: Große-Tichu ablehnen, die drei
+// niedrigsten Karten fürs Schupfen abgeben, den Drachenstich an den ersten Gegner vergeben,
+// bei offenem (erfüllbarem) Wunsch die passende Karte spielen, sonst anspielen (niedrigste
+// normale Karte) oder passen.
+function autoActionFor(seat) {
+  if (!round.dealt14) return { type: 'grandTichu', payload: { called: false } };
+  if (!round.schupfenDone) {
+    const hand = sortHand(round.hands[seat]);
+    const others = [0, 1, 2, 3].filter((s) => s !== seat);
+    const gives = {};
+    others.forEach((s, i) => { gives[s] = hand[i].id; });
+    return { type: 'schupfenSubmit', payload: { gives } };
+  }
+  if (round.pendingDragonGiveaway) {
+    const opponent = [0, 1, 2, 3].find((s) => teamOf(s) !== teamOf(seat));
+    return { type: 'giveDragonTrick', payload: { toPlayerIdx: opponent } };
+  }
+  if (round.wishPendingFulfillable(seat)) {
+    const card = round.hands[seat].find((c) => c.rank === round.pendingWish && !c.special);
+    return { type: 'play', payload: { cardIds: [card.id] } };
+  }
+  if (round.currentTrick.combo === null) {
+    const hand = sortHand(round.hands[seat]);
+    const card = hand.find((c) => !c.special) || hand[0];
+    return { type: 'play', payload: { cardIds: [card.id] } };
+  }
+  return { type: 'pass', payload: {} };
+}
+
+// Index des ersten Ereignisses der aktuell laufenden Runde (nach dem letzten `newRound`).
+function roundStartIndex() {
+  for (let i = events.length - 1; i >= 0; i--) if (events[i].type === 'newRound') return i + 1;
+  return 0;
+}
+// Wie viele eigene Spielzüge (Spielen/Passen) hat `seat` in dieser Runde zuletzt IN FOLGE
+// automatisch (wegen Timeout) gemacht?
+function autoStrikeCount(seat) {
+  const mine = events.slice(roundStartIndex()).filter((e) => e.seatIndex === seat && (e.type === 'play' || e.type === 'pass'));
+  let n = 0;
+  for (let i = mine.length - 1; i >= 0; i--) {
+    if (mine[i].payload && mine[i].payload.auto) n++;
+    else break;
+  }
+  return n;
+}
+
+async function handleTimeout(seat) {
+  if (!round) return;
+  const action = autoActionFor(seat);
+  if (!action) return;
+  try {
+    await postEvent(gameId, seat, action.type, { ...action.payload, auto: true });
+  } catch (e) {
+    console.warn('Automatischer Zug fehlgeschlagen:', e);
+    return;
+  }
+  if ((action.type === 'play' || action.type === 'pass') && !kicking && autoStrikeCount(seat) >= STRIKE_LIMIT) {
+    kicking = true;
+    try {
+      await postEvent(gameId, seat, 'kicked', { reason: 'inactivity' });
+      await leaveTable(gameId, seat);
+    } catch (e) {
+      console.warn('Kick wegen Inaktivität fehlgeschlagen:', e);
+    } finally {
+      kicking = false;
+    }
+  }
+}
+
+// Merkt sich, seit wann der aktuelle Akteur dran ist (setzt den Timer zurück, sobald sich der
+// Akteur ändert). Löst NIE für die eigene Person aus - der eigene Client soll die eigene,
+// gerade in Arbeit befindliche Entscheidung nicht selbst überschreiben; die drei anderen
+// Clients setzen den Timeout notfalls für einen um.
+function syncTurnTimer() {
+  const seat = actingSeat();
+  if (seat === null || seat === mySeat) {
+    turnTimerActor = null;
+    turnTimerStartedAt = null;
+    turnRemainingSec = null;
+    return;
+  }
+  if (turnTimerActor !== seat) {
+    turnTimerActor = seat;
+    turnTimerStartedAt = Date.now();
+  }
+}
+
+setInterval(() => {
+  if (turnTimerActor === null || turnTimerStartedAt === null) return;
+  const elapsed = Date.now() - turnTimerStartedAt;
+  turnRemainingSec = Math.max(0, Math.ceil((TURN_TIMEOUT_MS - elapsed) / 1000));
+  if (elapsed >= TURN_TIMEOUT_MS) {
+    const seat = turnTimerActor;
+    turnTimerActor = null;
+    turnTimerStartedAt = null;
+    handleTimeout(seat);
+  }
+  if (round) render();
+}, 1000);
 
 // Wenn man selbst am Zug ist, ein Wunsch offen ist und man eine einzelne passende Karte hat,
 // die den Tischstand schlägt, wird die automatisch gespielt statt sie manuell suchen zu
@@ -284,11 +434,13 @@ async function start() {
     const result = replay(initialDeal.first8, initialDeal.rest6, initialDeal.legacy, events);
     round = result.round;
     matchScore = result.matchScore;
+    currentSchupfenSubs = result.schupfenSubs;
     // Eine alte Fehlermeldung (z. B. aus einem eigenen fehlgeschlagenen Zug) verschwindet
     // sonst erst beim nächsten EIGENEN erfolgreichen Zug - Züge der anderen räumen sie nicht
     // weg. Neuer Spielstand = alter Fehler ist ohnehin nicht mehr aktuell.
     errorMsg = '';
     playAgainClicked = false;
+    syncTurnTimer();
     render();
     autoPlayWish();
   });
@@ -299,6 +451,19 @@ async function start() {
 // Punkte vom Ziel entfernt ist, muss einer der beiden Mitspieler diese Runde ein Tichu ansagen
 // - nur ein deutlicher Hinweis, keine harte Sperre (passt zum Vertrauensmodell des restlichen
 // Spielbretts).
+function renderTurnTimer() {
+  if (turnTimerActor === null || turnRemainingSec === null) return null;
+  const p = document.createElement('p');
+  p.className = 'error-banner';
+  p.style.background = '#1c2e3a';
+  p.style.borderColor = '#2563eb';
+  p.style.color = '#93c5fd';
+  const strikes = autoStrikeCount(turnTimerActor);
+  p.textContent = `${SEAT_LABELS[turnTimerActor]} ist am Zug - noch ${turnRemainingSec}s, sonst automatischer Zug`
+    + (strikes > 0 ? ` (${strikes}/${STRIKE_LIMIT}, danach Kick wegen Inaktivität)` : '.');
+  return p;
+}
+
 function renderTichuWarning() {
   if (!round || round.over) return null;
   if (!gameMeta || gameMeta.catchUpRule === false) return null;
@@ -322,6 +487,8 @@ function render() {
   const app = document.getElementById('app');
   app.innerHTML = '';
   if (!round) { app.innerHTML = '<p class="muted">Lade Spielstand…</p>'; return; }
+  const timerBanner = renderTurnTimer();
+  if (timerBanner) app.appendChild(timerBanner);
   const warn = renderTichuWarning();
   if (warn) app.appendChild(warn);
   if (!round.dealt14) app.appendChild(renderGrandTichu());

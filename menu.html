@@ -48,6 +48,15 @@
     errorEl.hidden = false;
   }
 
+  // Rücksprung von board.html, z. B. nach einem Kick wegen Inaktivität (siehe dortiger
+  // Zugtimer) - kurz anzeigen, dann aus der URL entfernen.
+  const notice = new URLSearchParams(location.search).get('notice');
+  if (notice) {
+    errorEl.textContent = notice;
+    errorEl.hidden = false;
+    history.replaceState(null, '', location.pathname);
+  }
+
   const user = await ensureSignedIn().catch((e) => { showError(e); return null; });
   if (!user) { window.location.href = 'index.html'; throw new Error('nicht angemeldet'); }
 
