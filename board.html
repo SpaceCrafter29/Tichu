@@ -285,16 +285,18 @@ async function start() {
 }
 
 // --- Renderer ------------------------------------------------------------
-// Hausregel: sobald das eigene Team beim Gesamtstand >= 900 (nahe am Ziel) steht, muss einer
-// der beiden Mitspieler diese Runde ein Tichu ansagen - nur ein deutlicher Hinweis, keine
-// harte Sperre (passt zum Vertrauensmodell des restlichen Spielbretts).
+// Hausregel (pro Tisch abschaltbar, siehe createTable()): sobald das eigene Team nur noch 100
+// Punkte vom Ziel entfernt ist, muss einer der beiden Mitspieler diese Runde ein Tichu ansagen
+// - nur ein deutlicher Hinweis, keine harte Sperre (passt zum Vertrauensmodell des restlichen
+// Spielbretts).
 function renderTichuWarning() {
   if (!round || round.over) return null;
+  if (!gameMeta || gameMeta.catchUpRule === false) return null;
   const myTeam = teamOf(mySeat);
-  if (matchScore[myTeam] < 900) return null;
+  const target = gameMeta.target || 1000;
+  if (matchScore[myTeam] < target - 100) return null;
   const alreadyCalled = [0, 1, 2, 3].some((i) => teamOf(i) === myTeam && (round.tichu[i] || round.grandTichu[i]));
   if (alreadyCalled) return null;
-  const target = gameMeta ? gameMeta.target : 1000;
   const p = document.createElement('p');
   p.className = 'error-banner';
   p.style.background = '#3a2c14';
