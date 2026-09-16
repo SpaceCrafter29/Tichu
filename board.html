@@ -77,7 +77,7 @@
 
 <script type="module">
 import { ensureSignedIn, getProfile } from './lib/auth.js';
-import { getAllHands, postEvent, watchEvents, watchGame, SEAT_LABELS } from './lib/lobby.js';
+import { getAllHands, dealFreshRound, postEvent, watchEvents, watchGame, SEAT_LABELS } from './lib/lobby.js';
 import { Round, teamOf } from './engine/game.js';
 import { sortHand, cardPoints } from './engine/cards.js';
 import { classify, canBeat } from './engine/combos.js';
@@ -103,7 +103,6 @@ if (!user) throw new Error('nicht angemeldet');
 const profile = await getProfile(user.uid);
 if (!profile || !profile.displayName) { window.location.href = 'index.html'; throw new Error('kein Profil'); }
 
-let initialHands = null;
 let gameMeta = null;
 let started = false;
 watchGame(gameId, (game) => {
@@ -170,21 +169,37 @@ function comboLabel(combo) {
 // Jeder Teilnehmer baut lokal aus derselben, geordneten Ereignisliste dieselbe Runde nach
 // (dieselbe Engine wie play.html). Kein serverseitiges Prüfen der Zug-Gültigkeit - ungültige/
 // verspätete Ereignisse werden beim Nachspielen einfach übersprungen (siehe firestore.rules).
-function replay(hands, events) {
-  const round = new Round({ hands });
-  const schupfenSubs = {};
+// `newRound`-Ereignisse tragen den kompletten frischen 8+6-Deal direkt im Payload (statt über
+// die privaten Sitz-Dokumente) - passt zum "alles öffentlich im Ereignis-Log"-Modell und
+// braucht keine weitere Firestore-Schreibkoordination. Werden nur verarbeitet, solange die
+// aktuelle Runde schon vorbei ist (`round.over`) - ein verfrühtes/doppeltes `newRound` (z. B.
+// zwei Leute klicken gleichzeitig "Nochmal spielen") wird sonst ignoriert.
+function replay(first8, rest6, legacy, events) {
+  let round = legacy ? new Round({ hands: first8 }) : new Round({ first8, rest6 });
+  let matchScore = [0, 0];
+  let schupfenSubs = {};
   for (const ev of events) {
     try {
+      if (ev.type === 'newRound') {
+        if (!round.over) continue;
+        matchScore = [matchScore[0] + round.result.teamScore[0], matchScore[1] + round.result.teamScore[1]];
+        round = new Round({ first8: ev.payload.first8, rest6: ev.payload.rest6 });
+        schupfenSubs = {};
+        continue;
+      }
       applyEvent(round, ev, schupfenSubs);
     } catch (e) {
       console.warn('Ereignis übersprungen:', ev, e.message);
     }
   }
-  return round;
+  return { round, matchScore };
 }
 function applyEvent(round, ev, schupfenSubs) {
   const { seatIndex, type, payload } = ev;
-  if (type === 'tichu') {
+  if (type === 'grandTichu') {
+    round.callGrandTichu(seatIndex, !!payload.called);
+    if (!round.dealt14 && round.grandTichu.every((v) => v !== null)) round.dealRest();
+  } else if (type === 'tichu') {
     round.callTichu(seatIndex);
   } else if (type === 'schupfenSubmit') {
     schupfenSubs[seatIndex] = payload.gives;
@@ -213,12 +228,15 @@ function applyEvent(round, ev, schupfenSubs) {
 
 // --- Zustand -----------------------------------------------------------
 let round = null;
+let matchScore = [0, 0]; // Punkte aus bereits ABGESCHLOSSENEN Runden (die laufende zählt erst bei Rundenende dazu)
+let initialDeal = null;
 let events = [];
 let selected = new Set();
 let schupfenDraft = {}; // {toSeat: cardId}
 let schupfenPendingCardId = null; // gerade angetippte, noch nicht zugeordnete Karte
 let errorMsg = '';
 let autoPlaying = false;
+let playAgainClicked = false;
 
 // Wenn man selbst am Zug ist, ein Wunsch offen ist und man eine einzelne passende Karte hat,
 // die den Tischstand schlägt, wird die automatisch gespielt statt sie manuell suchen zu
@@ -249,30 +267,108 @@ function withError(fn) {
 }
 
 async function start() {
-  initialHands = await getAllHands(gameId).catch((e) => { fatal('Konnte Hände nicht laden: ' + e.message); return null; });
-  if (!initialHands) return;
+  initialDeal = await getAllHands(gameId).catch((e) => { fatal('Konnte Hände nicht laden: ' + e.message); return null; });
+  if (!initialDeal) return;
   watchEvents(gameId, (evs) => {
     events = evs;
-    round = replay(initialHands, events);
+    const result = replay(initialDeal.first8, initialDeal.rest6, initialDeal.legacy, events);
+    round = result.round;
+    matchScore = result.matchScore;
     // Eine alte Fehlermeldung (z. B. aus einem eigenen fehlgeschlagenen Zug) verschwindet
     // sonst erst beim nächsten EIGENEN erfolgreichen Zug - Züge der anderen räumen sie nicht
     // weg. Neuer Spielstand = alter Fehler ist ohnehin nicht mehr aktuell.
     errorMsg = '';
+    playAgainClicked = false;
     render();
     autoPlayWish();
   });
 }
 
 // --- Renderer ------------------------------------------------------------
+// Hausregel: sobald das eigene Team beim Gesamtstand >= 900 (nahe am Ziel) steht, muss einer
+// der beiden Mitspieler diese Runde ein Tichu ansagen - nur ein deutlicher Hinweis, keine
+// harte Sperre (passt zum Vertrauensmodell des restlichen Spielbretts).
+function renderTichuWarning() {
+  if (!round || round.over) return null;
+  const myTeam = teamOf(mySeat);
+  if (matchScore[myTeam] < 900) return null;
+  const alreadyCalled = [0, 1, 2, 3].some((i) => teamOf(i) === myTeam && (round.tichu[i] || round.grandTichu[i]));
+  if (alreadyCalled) return null;
+  const target = gameMeta ? gameMeta.target : 1000;
+  const p = document.createElement('p');
+  p.className = 'error-banner';
+  p.style.background = '#3a2c14';
+  p.style.borderColor = '#8a5a16';
+  p.style.color = '#fdba74';
+  p.textContent = `Euer Team steht bei ${matchScore[myTeam]} Punkten (Ziel ${target}) - einer von euch beiden muss diese Runde ein Tichu ansagen!`;
+  return p;
+}
+
 function render() {
   const errEl = document.getElementById('error');
   errEl.innerHTML = errorMsg ? `<div class="error-banner">${errorMsg}</div>` : '';
   const app = document.getElementById('app');
   app.innerHTML = '';
   if (!round) { app.innerHTML = '<p class="muted">Lade Spielstand…</p>'; return; }
-  if (round.over) app.appendChild(renderRoundOver());
+  const warn = renderTichuWarning();
+  if (warn) app.appendChild(warn);
+  if (!round.dealt14) app.appendChild(renderGrandTichu());
+  else if (round.over) app.appendChild(renderRoundOver());
   else if (!round.schupfenDone) app.appendChild(renderSchupfen());
   else app.appendChild(renderPlaying());
+}
+
+function renderGrandTichu() {
+  const wrap = document.createElement('div');
+  const decidedCount = round.grandTichu.filter((v) => v !== null).length;
+
+  const status = document.createElement('p');
+  status.className = 'sub';
+  status.textContent = `Großes Tichu: ${decidedCount}/4 Spieler entschieden.`;
+  wrap.appendChild(status);
+
+  const handLabel = document.createElement('div');
+  handLabel.className = 'sub';
+  handLabel.style.margin = '0 0 6px';
+  handLabel.textContent = 'Deine ersten 8 Karten:';
+  wrap.appendChild(handLabel);
+
+  const row = document.createElement('div');
+  row.className = 'cards-row';
+  for (const c of sortHand(round.first8[mySeat])) row.appendChild(cardEl(c));
+  wrap.appendChild(row);
+
+  if (round.grandTichu[mySeat] !== null) {
+    const p = document.createElement('p');
+    p.className = 'muted';
+    p.style.marginTop = '12px';
+    p.textContent = round.grandTichu[mySeat]
+      ? 'Du hast Großes Tichu angesagt - warte auf die anderen…'
+      : 'Du hast abgelehnt - warte auf die anderen…';
+    wrap.appendChild(p);
+    return wrap;
+  }
+
+  const hint = document.createElement('p');
+  hint.className = 'sub';
+  hint.style.margin = '10px 0';
+  hint.textContent = 'Mit nur diesen 8 Karten: Großes Tichu ansagen (200/-200 Punkte) oder ablehnen - die restlichen 6 Karten kommen danach für alle gleichzeitig.';
+  wrap.appendChild(hint);
+
+  const row2 = document.createElement('div');
+  row2.className = 'row';
+  const yesBtn = document.createElement('button');
+  yesBtn.textContent = 'Großes Tichu ansagen';
+  yesBtn.addEventListener('click', withError(async () => { await postEvent(gameId, mySeat, 'grandTichu', { called: true }); }));
+  const noBtn = document.createElement('button');
+  noBtn.className = 'secondary';
+  noBtn.textContent = 'Kein Großes Tichu';
+  noBtn.addEventListener('click', withError(async () => { await postEvent(gameId, mySeat, 'grandTichu', { called: false }); }));
+  row2.appendChild(yesBtn);
+  row2.appendChild(noBtn);
+  wrap.appendChild(row2);
+
+  return wrap;
 }
 
 function renderSchupfen() {
@@ -402,11 +498,11 @@ function renderPlaying() {
         <span class="meta">${round.hands[i].length} Karten</span>
       </div>
       <div>
-        ${round.tichu[i] ? '<span class="flair t">Tichu</span>' : ''}
+        ${round.grandTichu[i] ? '<span class="flair gt">Großes Tichu</span>' : (round.tichu[i] ? '<span class="flair t">Tichu</span>' : '')}
         ${place >= 0 ? `<span class="flair place">Platz ${place + 1}</span>` : ''}
       </div>
     `;
-    if (i === mySeat && round.playedAny && !round.playedAny[i] && !round.tichu[i] && round.active.has(i)) {
+    if (i === mySeat && round.playedAny && !round.playedAny[i] && !round.tichu[i] && !round.grandTichu[i] && round.active.has(i)) {
       const tbtn = document.createElement('button');
       tbtn.className = 'seat-tichu-btn';
       tbtn.textContent = 'Tichu ansagen';
@@ -475,7 +571,7 @@ function renderPlaying() {
   playBtn.textContent = 'Karten spielen';
   playBtn.disabled = !myTurn || selected.size === 0;
   playBtn.addEventListener('click', withError(async () => {
-    const cards = round.hands[mySeat].filter((c) => selected.has(c.id));
+    const cards = sortHand(round.hands[mySeat].filter((c) => selected.has(c.id)));
     let wish;
     const isMahjongLead = cards.length === 1 && cards[0].special === 'MAHJONG' && round.currentTrick.combo === null;
     if (isMahjongLead) {
@@ -529,15 +625,41 @@ function renderRoundOver() {
   }
   wrap.appendChild(grid);
 
-  const note = document.createElement('p');
-  note.className = 'muted';
-  note.textContent = 'Für eine weitere Runde aktuell einen neuen Tisch erstellen - automatische Rundenfolge folgt später.';
-  wrap.appendChild(note);
+  const finalScore = [matchScore[0] + r.teamScore[0], matchScore[1] + r.teamScore[1]];
+  const target = gameMeta ? gameMeta.target : 1000;
+  const matchP = document.createElement('p');
+  matchP.innerHTML = `Gesamtstand: <b>${finalScore[0]}</b> (${teamNames[0]}) : <b>${finalScore[1]}</b> (${teamNames[1]}) · Ziel ${target}`;
+  wrap.appendChild(matchP);
 
-  const btn = document.createElement('button');
-  btn.textContent = 'Zurück zum Menü';
-  btn.addEventListener('click', () => { window.location.href = 'menu.html'; });
-  wrap.appendChild(btn);
+  const matchOver = finalScore[0] >= target || finalScore[1] >= target;
+  if (matchOver) {
+    const winner = finalScore[0] === finalScore[1] ? null : (finalScore[0] > finalScore[1] ? 0 : 1);
+    const p = document.createElement('p');
+    p.innerHTML = `<b>Match beendet</b> - ${winner == null ? 'Unentschieden' : 'Team ' + teamNames[winner] + ' gewinnt!'}`;
+    wrap.appendChild(p);
+    const btn = document.createElement('button');
+    btn.textContent = 'Zurück zum Menü';
+    btn.addEventListener('click', () => { window.location.href = 'menu.html'; });
+    wrap.appendChild(btn);
+  } else {
+    const again = document.createElement('button');
+    again.textContent = playAgainClicked ? 'Nächste Runde startet…' : 'Nochmal spielen';
+    again.disabled = playAgainClicked;
+    again.addEventListener('click', withError(async () => {
+      playAgainClicked = true;
+      render();
+      const { first8, rest6 } = dealFreshRound();
+      await postEvent(gameId, mySeat, 'newRound', { first8, rest6 });
+    }));
+    wrap.appendChild(again);
+
+    const menuBtn = document.createElement('button');
+    menuBtn.className = 'secondary';
+    menuBtn.style.marginLeft = '8px';
+    menuBtn.textContent = 'Zurück zum Menü';
+    menuBtn.addEventListener('click', () => { window.location.href = 'menu.html'; });
+    wrap.appendChild(menuBtn);
+  }
 
   return wrap;
 }

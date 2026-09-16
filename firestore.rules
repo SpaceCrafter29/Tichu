@@ -93,22 +93,26 @@ service cloud.firestore {
           && (resource.data.claimedByUid == request.auth.uid || isParticipant(gameId));
 
         // Sitz beanspruchen: nur als sich selbst, mit leerer Starthand (Plätze 1-3) oder direkt
-        // mit der vollen Hand (der vierte Spieler mischt und legt seine eigene Hand im selben
-        // Zug an, siehe joinTable() in lobby.js).
+        // mit den ersten 8 Karten + den zurückgehaltenen restlichen 6 (der vierte Spieler
+        // mischt und legt seine eigene Hand im selben Zug an, siehe joinTable() in lobby.js;
+        // die 6 restlichen Karten kommen erst nach der Großen-Tichu-Entscheidung über
+        // `newRound`-Ereignisse dazu, nicht mehr über dieses Dokument).
         allow create: if signedIn()
           && request.resource.data.claimedByUid == request.auth.uid
-          && (request.resource.data.hand.size() == 0 || request.resource.data.hand.size() == 14);
+          && (request.resource.data.hand.size() == 0 || request.resource.data.hand.size() == 8)
+          && (request.resource.data.restHand.size() == 0 || request.resource.data.restHand.size() == 6);
 
         allow update: if signedIn() && (
           // eigene Hand fortlaufend aktualisieren (z. B. beim Ausspielen von Karten)
           resource.data.claimedByUid == request.auth.uid
           ||
           // einmaliges Austeilen durch den Mitspieler, der den vierten Sitz füllt: darf nur
-          // das `hand`-Feld setzen, und nur solange die Hand noch leer (also nicht ausgeteilt) ist.
-          // (Kein isParticipant()-Check hier, aus demselben Transaktions-Sichtbarkeitsgrund wie
-          // oben - Restrisiko ist dokumentiert in der README.)
+          // `hand`/`restHand` setzen, und nur solange die Hand noch leer (also nicht
+          // ausgeteilt) ist. (Kein isParticipant()-Check hier, aus demselben
+          // Transaktions-Sichtbarkeitsgrund wie oben - Restrisiko ist dokumentiert in der
+          // README.)
           (resource.data.hand.size() == 0
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hand']))
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hand', 'restHand']))
         );
 
         // Verlassen: die eigene private Hand darf immer gelöscht werden. Beim Tisch-Reset

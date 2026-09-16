@@ -17,12 +17,20 @@ export class Round {
   // `hands`: optional vier bereits fertig ausgeteilte 14er-Hände (z. B. von einem Server/
   // Firestore übernommen statt hier lokal gemischt) - überspringt damit automatisch das
   // Große-Tichu-Fenster (8+6-Aufteilung), weil die Karten schon alle beim Spieler liegen.
-  constructor({ rng = Math.random, hands } = {}) {
-    let first8, rest6, dealt14;
+  // `first8`/`rest6`: optional bereits fertig gemischte/aufgeteilte Hände (z. B. von einem
+  // Server/Firestore übernommen statt hier lokal gemischt) - durchläuft aber trotzdem normal
+  // das Große-Tichu-Fenster (im Gegensatz zu `hands`), weil die letzten 6 noch zurückgehalten
+  // werden.
+  constructor({ rng = Math.random, hands, first8, rest6 } = {}) {
+    let dealt14;
     if (hands) {
       first8 = hands.map((h) => h.slice());
       rest6 = [[], [], [], []];
       dealt14 = true;
+    } else if (first8 && rest6) {
+      first8 = first8.map((h) => h.slice());
+      rest6 = rest6.map((h) => h.slice());
+      dealt14 = false;
     } else {
       const deck = shuffle(createDeck(), rng);
       ({ first8, rest6 } = deal(deck));
