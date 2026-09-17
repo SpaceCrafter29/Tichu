@@ -10,7 +10,7 @@ service cloud.firestore {
     // lib/lobby.js: ADMIN_UIDS/isAdminUid()). Bewusst eine feste Liste statt eines Felds in
     // Firestore, damit niemand sich selbst per Schreibzugriff zum Admin machen kann.
     function isAdmin() {
-      return signedIn() && request.auth.uid in ['ADMIN_UID_PLACEHOLDER'];
+      return signedIn() && request.auth.uid in ['HNaYIyZ44qgLwWF12XRyA6jQRjM2'];
     }
 
     // Hat `request.auth.uid` irgendeinen der vier Sitzplätze dieses Tisches beansprucht?
