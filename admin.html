@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tichu - Admin</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<main>
+  <a href="menu.html" class="back-link">&larr; Menü</a>
+  <h1 style="margin:0">Admin-Dashboard</h1>
+  <p class="sub" id="greeting" style="margin:4px 0 0">…</p>
+
+  <p class="error" id="error" hidden></p>
+
+  <div id="admin-content" hidden>
+    <div class="panel" style="margin-top: 16px;">
+      <div class="row">
+        <h3 style="margin:0">Neuen Tisch erstellen</h3>
+        <div class="row" style="gap: 6px;">
+          <button id="create-freeplay" class="secondary" style="padding: 6px 12px; font-size: 0.85rem;">+ Free Play</button>
+          <button id="create-tournament" class="secondary" style="padding: 6px 12px; font-size: 0.85rem;">+ Turnier</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-top: 16px;">
+      <h3 style="margin:0 0 8px">Alle Tische</h3>
+      <div id="game-list"><p class="muted">Lade…</p></div>
+    </div>
+  </div>
+</main>
+
+<script type="module">
+  import { ensureSignedIn, getProfile } from './lib/auth.js';
+  import {
+    watchAllGames, isAdminUid, leaveTable, adminDeleteTable, createTable, SEAT_LABELS,
+  } from './lib/lobby.js';
+
+  const errorEl = document.getElementById('error');
+  function showError(e) {
+    console.error(e);
+    errorEl.textContent = e && e.message ? e.message : String(e);
+    errorEl.hidden = false;
+  }
+
+  const user = await ensureSignedIn().catch((e) => { showError(e); return null; });
+  if (!user) throw new Error('nicht angemeldet');
+  const profile = await getProfile(user.uid);
+  document.getElementById('greeting').textContent = profile && profile.displayName
+    ? `Angemeldet als ${profile.displayName}.`
+    : '';
+
+  if (!isAdminUid(user.uid)) {
+    showError('Kein Zugriff - diese uid ist nicht als Admin hinterlegt.');
+    throw new Error('kein Admin');
+  }
+  document.getElementById('admin-content').hidden = false;
+
+  const STATUS_LABELS = { waiting: 'wartet', dealt: 'ausgeteilt', playing: 'läuft', finished: 'beendet' };
+  const listEl = document.getElementById('game-list');
+
+  function renderGames(games) {
+    if (games.length === 0) {
+      listEl.innerHTML = '<p class="muted">Keine Tische vorhanden.</p>';
+      return;
+    }
+    // Neueste zuerst.
+    const sorted = games.slice().sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+    listEl.innerHTML = '';
+    for (const game of sorted) {
+      const row = document.createElement('div');
+      row.className = 'table-row';
+      row.style.flexDirection = 'column';
+      row.style.alignItems = 'stretch';
+      row.style.gap = '6px';
+
+      const head = document.createElement('div');
+      head.className = 'row';
+      const title = document.createElement('span');
+      title.innerHTML = `<b>${game.name || game.id}</b> <span class="muted">(${game.mode}, ${STATUS_LABELS[game.status] || game.status}, Ziel ${game.target})</span>`;
+      head.appendChild(title);
+      const delBtn = document.createElement('button');
+      delBtn.className = 'secondary';
+      delBtn.style.padding = '4px 10px';
+      delBtn.style.fontSize = '0.8rem';
+      delBtn.textContent = 'Tisch löschen';
+      delBtn.addEventListener('click', async () => {
+        if (!confirm(`Tisch "${game.name || game.id}" wirklich komplett löschen?`)) return;
+        delBtn.disabled = true;
+        try {
+          await adminDeleteTable(game.id);
+        } catch (e) {
+          showError(e);
+          delBtn.disabled = false;
+        }
+      });
+      head.appendChild(delBtn);
+      row.appendChild(head);
+
+      const seatsRow = document.createElement('div');
+      seatsRow.className = 'seat-grid';
+      (game.seats || [null, null, null, null]).forEach((token, i) => {
+        const chip = document.createElement('div');
+        chip.className = 'seat-chip' + (token ? ' filled' : '');
+        chip.style.display = 'flex';
+        chip.style.alignItems = 'center';
+        chip.style.gap = '6px';
+        chip.textContent = SEAT_LABELS[i] + (token ? ' - belegt' : ' - frei');
+        if (token) {
+          const kickBtn = document.createElement('button');
+          kickBtn.className = 'secondary';
+          kickBtn.style.padding = '2px 8px';
+          kickBtn.style.fontSize = '0.75rem';
+          kickBtn.textContent = 'Kicken';
+          kickBtn.addEventListener('click', async () => {
+            kickBtn.disabled = true;
+            try {
+              await leaveTable(game.id, i);
+            } catch (e) {
+              showError(e);
+              kickBtn.disabled = false;
+            }
+          });
+          chip.appendChild(kickBtn);
+        }
+        seatsRow.appendChild(chip);
+      });
+      row.appendChild(seatsRow);
+
+      listEl.appendChild(row);
+    }
+  }
+
+  watchAllGames(renderGames);
+
+  document.getElementById('create-freeplay').addEventListener('click', async () => {
+    try { await createTable('freeplay'); } catch (e) { showError(e); }
+  });
+  document.getElementById('create-tournament').addEventListener('click', async () => {
+    try { await createTable('tournament'); } catch (e) { showError(e); }
+  });
+</script>
+</body>
+</html>

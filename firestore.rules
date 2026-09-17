@@ -6,6 +6,13 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    // Feste uids mit Admin-Rechten (jeden Sitz kicken, jeden Tisch anlegen/löschen - siehe
+    // lib/lobby.js: ADMIN_UIDS/isAdminUid()). Bewusst eine feste Liste statt eines Felds in
+    // Firestore, damit niemand sich selbst per Schreibzugriff zum Admin machen kann.
+    function isAdmin() {
+      return signedIn() && request.auth.uid in ['ADMIN_UID_PLACEHOLDER'];
+    }
+
     // Hat `request.auth.uid` irgendeinen der vier Sitzplätze dieses Tisches beansprucht?
     // (Ohne diese Prüfung könnte jeder beliebige angemeldete Nutzer fremde Tische verändern.)
     function isParticipant(gameId) {
@@ -63,6 +70,27 @@ service cloud.firestore {
       return seats[0] == null && seats[1] == null && seats[2] == null && seats[3] == null;
     }
 
+    // Lobby-Inaktivität: ein Mitspieler an einem NOCH WARTENDEN Tisch darf einen anderen,
+    // seit über 90s nicht mehr "geheartbeateten" Sitz räumen (siehe heartbeat()/checkStaleSeats()
+    // in lib/room.js) - sonst blockiert eine abwesende Person den Tisch auf unbestimmte Zeit.
+    // Exakt dieselbe Form wie isMySeatCleared() oben, nur mit einer Zeit- statt einer
+    // Besitz-Prüfung.
+    function isStaleSeatCleared(gameId, before, after) {
+      return
+        (before[0] != null && after[0] == null && before[1] == after[1] && before[2] == after[2] && before[3] == after[3]
+          && exists(/databases/$(database)/documents/games/$(gameId)/private/seat0)
+          && get(/databases/$(database)/documents/games/$(gameId)/private/seat0).data.lastActive < request.time - duration.value(90, 's'))
+        || (before[1] != null && after[1] == null && before[0] == after[0] && before[2] == after[2] && before[3] == after[3]
+          && exists(/databases/$(database)/documents/games/$(gameId)/private/seat1)
+          && get(/databases/$(database)/documents/games/$(gameId)/private/seat1).data.lastActive < request.time - duration.value(90, 's'))
+        || (before[2] != null && after[2] == null && before[0] == after[0] && before[1] == after[1] && before[3] == after[3]
+          && exists(/databases/$(database)/documents/games/$(gameId)/private/seat2)
+          && get(/databases/$(database)/documents/games/$(gameId)/private/seat2).data.lastActive < request.time - duration.value(90, 's'))
+        || (before[3] != null && after[3] == null && before[0] == after[0] && before[1] == after[1] && before[2] == after[2]
+          && exists(/databases/$(database)/documents/games/$(gameId)/private/seat3)
+          && get(/databases/$(database)/documents/games/$(gameId)/private/seat3).data.lastActive < request.time - duration.value(90, 's'));
+    }
+
     match /games/{gameId} {
       // Öffentlicher Spielstand (Sitz-Tokens, Stiche, Punkte, wer am Zug ist) - enthält
       // absichtlich keine uids/Anzeigenamen, ist also für alle angemeldeten Nutzer unbedenklich.
@@ -73,18 +101,26 @@ service cloud.firestore {
       // Firestore-Schreibzugriff fremde Sitze überschreiben). Oder: der eigene Sitz wird
       // wieder freigegeben (Verlassen, siehe leaveTable() in lobby.js).
       allow update: if signedIn()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['seats', 'status'])
         && (
-          seatsOnlyGrow(resource.data.seats, request.resource.data.seats)
-          || (isMySeatCleared(gameId, resource.data.seats, request.resource.data.seats)
-            && request.resource.data.status == 'waiting')
-          || (isParticipant(gameId)
-            && isFullReset(request.resource.data.seats)
-            && request.resource.data.status == 'waiting')
+          isAdmin()
+          || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['seats', 'status'])
+            && (
+              seatsOnlyGrow(resource.data.seats, request.resource.data.seats)
+              || (isMySeatCleared(gameId, resource.data.seats, request.resource.data.seats)
+                && request.resource.data.status == 'waiting')
+              || (isParticipant(gameId)
+                && isFullReset(request.resource.data.seats)
+                && request.resource.data.status == 'waiting')
+              || (isParticipant(gameId)
+                && resource.data.status == 'waiting'
+                && request.resource.data.status == 'waiting'
+                && isStaleSeatCleared(gameId, resource.data.seats, request.resource.data.seats))
+            ))
         );
-      // Löschen: nur leere Tische (kein belegter Sitz) - kann also nie echte Spieldaten
-      // wegwerfen, ist aber genug, um verwaiste/Test-Tische aufzuräumen.
-      allow delete: if signedIn() && isFullReset(resource.data.seats);
+      // Löschen: normalerweise nur leere Tische (kein belegter Sitz) - kann also nie echte
+      // Spieldaten wegwerfen, ist aber genug, um verwaiste/Test-Tische aufzuräumen. Admins
+      // dürfen zusätzlich jeden Tisch löschen (siehe isAdmin() oben).
+      allow delete: if signedIn() && (isFullReset(resource.data.seats) || isAdmin());
 
       // Die Hand jedes Sitzes: die eigene uid, oder ein Mitspieler an diesem Tisch (bewusste
       // Vereinfachung fürs Online-Spielbrett - Schupfen/Züge laufen über ein für alle
@@ -120,9 +156,10 @@ service cloud.firestore {
         // Verlassen: die eigene private Hand darf immer gelöscht werden. Beim Tisch-Reset
         // (siehe isFullReset oben) darf ein Teilnehmer auch die private Hand der anderen drei
         // löschen - sonst blieben deren Handkarten-Dokumente nicht-leer und blockierten einen
-        // künftigen Beitritt (siehe Kommentar bei leaveTable() in lobby.js).
+        // künftigen Beitritt (siehe Kommentar bei leaveTable() in lobby.js). Admins dürfen
+        // zusätzlich jede private Hand löschen (siehe isAdmin() oben).
         allow delete: if signedIn()
-          && (resource.data.claimedByUid == request.auth.uid || isParticipant(gameId));
+          && (resource.data.claimedByUid == request.auth.uid || isParticipant(gameId) || isAdmin());
       }
 
       // Ereignis-Log der gespielten Züge (einmal gespielte Karten sind ohnehin öffentlich).
