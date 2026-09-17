@@ -127,8 +127,10 @@ service cloud.firestore {
       // Teilnehmer sichtbares Ereignis-Log, siehe events unten; echte Geheimhaltung bräuchte
       // pro-Empfänger-Postfächer, was für den aktuellen Umfang zu viel Aufwand ist).
       match /private/{seatDoc} {
+        // Admins dürfen jede private Hand lesen (nötig, damit adminDeleteTable() vorher prüfen
+        // kann, welche der vier Sitz-Docs überhaupt existieren, siehe lib/lobby.js).
         allow read: if signedIn()
-          && (resource.data.claimedByUid == request.auth.uid || isParticipant(gameId));
+          && (resource.data.claimedByUid == request.auth.uid || isParticipant(gameId) || isAdmin());
 
         // Sitz beanspruchen: nur als sich selbst, mit leerer Starthand (Plätze 1-3) oder direkt
         // mit den ersten 8 Karten + den zurückgehaltenen restlichen 6 (der vierte Spieler
