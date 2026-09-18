@@ -36,6 +36,7 @@
   import { ensureSignedIn, getProfile } from './lib/auth.js';
   import {
     watchAllGames, isAdminUid, leaveTable, adminDeleteTable, createTable, SEAT_LABELS,
+    describeWinCondition,
   } from './lib/lobby.js';
 
   const errorEl = document.getElementById('error');
@@ -79,7 +80,7 @@
       const head = document.createElement('div');
       head.className = 'row';
       const title = document.createElement('span');
-      title.innerHTML = `<b>${game.name || game.id}</b> <span class="muted">(${game.mode}, ${STATUS_LABELS[game.status] || game.status}, Ziel ${game.target})</span>`;
+      title.innerHTML = `<b>${game.name || game.id}</b> <span class="muted">(${game.mode}, ${STATUS_LABELS[game.status] || game.status}, ${describeWinCondition(game)})</span>`;
       head.appendChild(title);
       const delBtn = document.createElement('button');
       delBtn.className = 'secondary';

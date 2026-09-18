@@ -77,7 +77,10 @@
 
 <script type="module">
 import { ensureSignedIn, getProfile } from './lib/auth.js';
-import { getAllHands, dealFreshRound, postEvent, watchEvents, watchGame, leaveTable, SEAT_LABELS } from './lib/lobby.js';
+import {
+  getAllHands, dealFreshRound, postEvent, watchEvents, watchGame, leaveTable, SEAT_LABELS,
+  getWinCondition, describeWinCondition,
+} from './lib/lobby.js';
 import { Round, teamOf } from './engine/game.js';
 import { sortHand, cardPoints } from './engine/cards.js';
 import { classify, canBeat } from './engine/combos.js';
@@ -111,7 +114,7 @@ watchGame(gameId, (game) => {
   gameMeta = game;
   if (game) {
     document.getElementById('title').textContent = game.name ? `Tisch ${game.name}` : 'Tichu';
-    document.getElementById('subtitle').textContent = `Ziel ${game.target} Punkte`;
+    document.getElementById('subtitle').textContent = describeWinCondition(game);
     // Springt der Tisch, NACHDEM er schon lief, wieder auf 'waiting' zurück, hat jemand ihn
     // zurückgesetzt (manuell verlassen oder wegen Inaktivität gekickt, siehe handleTimeout) -
     // alle Clients (auch der gekickte selbst, falls dessen Tab noch offen ist) müssen dann
@@ -205,11 +208,13 @@ function replay(first8, rest6, legacy, events) {
   let round = legacy ? new Round({ hands: first8 }) : new Round({ first8, rest6 });
   let matchScore = [0, 0];
   let schupfenSubs = {};
+  let roundsCompleted = 0; // für die "Best of N Runden"-Siegbedingung, siehe renderRoundOver()
   for (const ev of events) {
     try {
       if (ev.type === 'newRound') {
         if (!round.over) continue;
         matchScore = [matchScore[0] + round.result.teamScore[0], matchScore[1] + round.result.teamScore[1]];
+        roundsCompleted++;
         round = new Round({ first8: seatMapToArr(ev.payload.first8), rest6: seatMapToArr(ev.payload.rest6) });
         schupfenSubs = {};
         continue;
@@ -219,7 +224,8 @@ function replay(first8, rest6, legacy, events) {
       console.warn('Ereignis übersprungen:', ev, e.message);
     }
   }
-  return { round, matchScore, schupfenSubs };
+  if (round.over) roundsCompleted++; // die gerade beendete (noch nicht per newRound abgelöste) Runde mitzählen
+  return { round, matchScore, schupfenSubs, roundsCompleted };
 }
 function applyEvent(round, ev, schupfenSubs) {
   const { seatIndex, type, payload } = ev;
@@ -256,6 +262,7 @@ function applyEvent(round, ev, schupfenSubs) {
 // --- Zustand -----------------------------------------------------------
 let round = null;
 let matchScore = [0, 0]; // Punkte aus bereits ABGESCHLOSSENEN Runden (die laufende zählt erst bei Rundenende dazu)
+let roundsCompleted = 0; // inkl. der aktuellen, falls sie gerade zu Ende ist - für "Best of N"
 let initialDeal = null;
 let events = [];
 let selected = new Set();
@@ -435,6 +442,7 @@ async function start() {
     round = result.round;
     matchScore = result.matchScore;
     currentSchupfenSubs = result.schupfenSubs;
+    roundsCompleted = result.roundsCompleted;
     // Eine alte Fehlermeldung (z. B. aus einem eigenen fehlgeschlagenen Zug) verschwindet
     // sonst erst beim nächsten EIGENEN erfolgreichen Zug - Züge der anderen räumen sie nicht
     // weg. Neuer Spielstand = alter Fehler ist ohnehin nicht mehr aktuell.
@@ -467,9 +475,10 @@ function renderTurnTimer() {
 function renderTichuWarning() {
   if (!round || round.over) return null;
   if (!gameMeta || gameMeta.catchUpRule === false) return null;
+  const wc = getWinCondition(gameMeta);
+  if (wc.type !== 'points') return null; // Hausregel ("100 Punkte vom Ziel") ergibt bei "Best of N" keinen Sinn
   const myTeam = teamOf(mySeat);
-  const target = gameMeta.target || 1000;
-  if (matchScore[myTeam] < target - 100) return null;
+  if (matchScore[myTeam] < wc.target - 100) return null;
   const alreadyCalled = [0, 1, 2, 3].some((i) => teamOf(i) === myTeam && (round.tichu[i] || round.grandTichu[i]));
   if (alreadyCalled) return null;
   const p = document.createElement('p');
@@ -477,7 +486,7 @@ function renderTichuWarning() {
   p.style.background = '#3a2c14';
   p.style.borderColor = '#8a5a16';
   p.style.color = '#fdba74';
-  p.textContent = `Euer Team steht bei ${matchScore[myTeam]} Punkten (Ziel ${target}) - einer von euch beiden muss diese Runde ein Tichu ansagen!`;
+  p.textContent = `Euer Team steht bei ${matchScore[myTeam]} Punkten (Ziel ${wc.target}) - einer von euch beiden muss diese Runde ein Tichu ansagen!`;
   return p;
 }
 
@@ -817,12 +826,13 @@ function renderRoundOver() {
   wrap.appendChild(grid);
 
   const finalScore = [matchScore[0] + r.teamScore[0], matchScore[1] + r.teamScore[1]];
-  const target = gameMeta ? gameMeta.target : 1000;
+  const wc = getWinCondition(gameMeta);
   const matchP = document.createElement('p');
-  matchP.innerHTML = `Gesamtstand: <b>${finalScore[0]}</b> (${teamNames[0]}) : <b>${finalScore[1]}</b> (${teamNames[1]}) · Ziel ${target}`;
+  matchP.innerHTML = `Gesamtstand: <b>${finalScore[0]}</b> (${teamNames[0]}) : <b>${finalScore[1]}</b> (${teamNames[1]}) · ${describeWinCondition(gameMeta)}`
+    + (wc.type === 'rounds' ? ` (Runde ${roundsCompleted}/${wc.count})` : '');
   wrap.appendChild(matchP);
 
-  const matchOver = finalScore[0] >= target || finalScore[1] >= target;
+  const matchOver = wc.type === 'rounds' ? roundsCompleted >= wc.count : (finalScore[0] >= wc.target || finalScore[1] >= wc.target);
   if (matchOver) {
     const winner = finalScore[0] === finalScore[1] ? null : (finalScore[0] > finalScore[1] ? 0 : 1);
     const p = document.createElement('p');
