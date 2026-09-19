@@ -235,7 +235,17 @@ function applyEvent(round, ev, schupfenSubs) {
   } else if (type === 'tichu') {
     round.callTichu(seatIndex);
   } else if (type === 'schupfenSubmit') {
-    schupfenSubs[seatIndex] = payload.gives;
+    // Erst validieren, DANN in schupfenSubs eintragen - sonst würde ein veraltetes Ereignis
+    // (z. B. aus einem wiederverwendeten Tisch, dessen events-Log nicht geleert wurde) die
+    // Runde fälschlich als "schon geschupft" markieren, obwohl round.schupfen() weiter unten
+    // wegen unauffindbarer Kartenreferenzen nie erfolgreich durchläuft (die Runde hängt dann
+    // fest, siehe Kommentar bei renderSchupfen()).
+    const others = [0, 1, 2, 3].filter((s) => s !== seatIndex);
+    const gives = payload.gives || {};
+    if (!others.every((s) => round.hands[seatIndex].some((c) => c.id === gives[s]))) {
+      throw new Error('Schupfen-Zuordnung verweist auf nicht (mehr) vorhandene Karten');
+    }
+    schupfenSubs[seatIndex] = gives;
     if (!round.schupfenDone && [0, 1, 2, 3].every((i) => schupfenSubs[i])) {
       const matrix = [0, 1, 2, 3].map((i) => {
         const m = {};
@@ -375,12 +385,14 @@ async function handleTimeout(seat) {
 }
 
 // Merkt sich, seit wann der aktuelle Akteur dran ist (setzt den Timer zurück, sobald sich der
-// Akteur ändert). Löst NIE für die eigene Person aus - der eigene Client soll die eigene,
-// gerade in Arbeit befindliche Entscheidung nicht selbst überschreiben; die drei anderen
-// Clients setzen den Timeout notfalls für einen um.
+// Akteur ändert) - läuft für ALLE sichtbar mit, auch für die/den Betroffene(n) selbst, damit
+// man die eigene Restzeit sieht. Der automatische Zug bei Ablauf (siehe unten im Interval)
+// wird aber weiterhin NIE vom eigenen Client ausgelöst - man soll die eigene, gerade in Arbeit
+// befindliche Entscheidung nicht selbst überschreiben; die drei anderen Clients setzen den
+// Timeout notfalls für einen um.
 function syncTurnTimer() {
   const seat = actingSeat();
-  if (seat === null || seat === mySeat) {
+  if (seat === null) {
     turnTimerActor = null;
     turnTimerStartedAt = null;
     turnRemainingSec = null;
@@ -400,7 +412,7 @@ setInterval(() => {
     const seat = turnTimerActor;
     turnTimerActor = null;
     turnTimerStartedAt = null;
-    handleTimeout(seat);
+    if (seat !== mySeat) handleTimeout(seat);
   }
   if (round) render();
 }, 1000);
@@ -467,7 +479,8 @@ function renderTurnTimer() {
   p.style.borderColor = '#2563eb';
   p.style.color = '#93c5fd';
   const strikes = autoStrikeCount(turnTimerActor);
-  p.textContent = `${SEAT_LABELS[turnTimerActor]} ist am Zug - noch ${turnRemainingSec}s, sonst automatischer Zug`
+  const who = turnTimerActor === mySeat ? 'Du bist' : `${SEAT_LABELS[turnTimerActor]} ist`;
+  p.textContent = `${who} am Zug - noch ${turnRemainingSec}s, sonst automatischer Zug`
     + (strikes > 0 ? ` (${strikes}/${STRIKE_LIMIT}, danach Kick wegen Inaktivität)` : '.');
   return p;
 }

@@ -70,6 +70,16 @@ service cloud.firestore {
       return seats[0] == null && seats[1] == null && seats[2] == null && seats[3] == null;
     }
 
+    // Ein komplett leerer, wartender Tisch hat keine schützenswerten Spieldaten mehr übrig -
+    // genau wie beim games/{gameId}-Löschen (siehe unten) darf dann auch sein events-Log geräumt
+    // werden. Nötig, weil dieselbe gameId nach einem Vollreset für die nächsten vier
+    // Beitretenden wiederverwendet wird - ohne das würden Ereignisse der ALTEN Partie beim
+    // Nachspielen der neuen mitverarbeitet (siehe clearEvents() in lib/lobby.js).
+    function isTableFullyEmpty(gameId) {
+      let g = get(/databases/$(database)/documents/games/$(gameId)).data;
+      return g.status == 'waiting' && isFullReset(g.seats);
+    }
+
     // Lobby-Inaktivität: ein Mitspieler an einem NOCH WARTENDEN Tisch darf einen anderen,
     // seit über 90s nicht mehr "geheartbeateten" Sitz räumen (siehe heartbeat()/checkStaleSeats()
     // in lib/room.js) - sonst blockiert eine abwesende Person den Tisch auf unbestimmte Zeit.
@@ -168,7 +178,13 @@ service cloud.firestore {
       match /events/{eventId} {
         allow read: if signedIn();
         allow create: if signedIn() && isParticipant(gameId);
-        allow update, delete: if false;
+        allow update: if false;
+        // Löschen: normalerweise nie (Ereignisse sind ein unveränderliches Log). Ausnahme: das
+        // komplette Log eines schon leeren, wartenden Tisches darf geräumt werden (siehe
+        // isTableFullyEmpty() oben) - passiert automatisch bei jedem Vollreset (leaveTable() in
+        // lib/lobby.js), damit eine spätere Wiederverwendung derselben gameId nicht die
+        // Ereignisse der alten Partie mitschleppt. Admins dürfen zusätzlich jederzeit aufräumen.
+        allow delete: if signedIn() && (isAdmin() || isTableFullyEmpty(gameId));
       }
     }
   }
