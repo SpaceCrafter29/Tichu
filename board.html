@@ -565,11 +565,15 @@ function renderSchupfen() {
 
   const status = document.createElement('p');
   status.className = 'sub';
-  const doneCount = events.filter((e) => e.type === 'schupfenSubmit').length;
+  // currentSchupfenSubs kommt aus replay() und wird dort bei jedem 'newRound' zurückgesetzt -
+  // zählt also nur Einreichungen DIESER Runde. Ein direktes Zählen über das komplette
+  // events-Log wäre falsch: Sitzindizes sind über Runden hinweg stabil, ab Runde 2 stünde man
+  // sonst fälschlich sofort als "schon abgegeben", weil man das in Runde 1 schonmal war.
+  const doneCount = [0, 1, 2, 3].filter((i) => currentSchupfenSubs[i]).length;
   status.textContent = `Schupfen: ${doneCount}/4 Spieler bereit.`;
   wrap.appendChild(status);
 
-  const alreadySubmitted = events.some((e) => e.type === 'schupfenSubmit' && e.seatIndex === mySeat);
+  const alreadySubmitted = !!currentSchupfenSubs[mySeat];
 
   if (alreadySubmitted) {
     const p = document.createElement('p');
