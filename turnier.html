@@ -102,6 +102,26 @@ let draftTables = [];  // [{ seats:[uid,uid,uid,uid], target:1000 }] - Entwurf, 
 let planMsg = '';
 let autoJoinedGameId = null;
 
+// ---------- Vorausgefüllte Links (siehe README: "ich sag's, du tippst nur einmal") ----------
+// Erlaubt es, einen fertigen Admin-Vorgang als Link zu verschicken, statt ihn von Hand eintippen
+// zu müssen - z. B. turnier.html?tab=accounts&newU=emil&newP=apfel-77 oder
+// turnier.html?tab=plan&day=3&draft=anna,ben,clara,david|emil,finn,greta,hannah . Löst selbst
+// NICHTS aus (kein automatisches Speichern!) - füllt nur das Formular, der Admin muss den
+// vorhandenen Speichern-Button trotzdem noch selbst antippen.
+const prefill = new URLSearchParams(location.search);
+let pendingDraftUsernames = null; // [{ names:[4], target }] - bis players geladen sind, dann aufgelöst
+(function applyPrefill() {
+  if (prefill.get('tab')) tab = prefill.get('tab');
+  if (prefill.has('newU')) newU = prefill.get('newU');
+  if (prefill.has('newP')) newP = prefill.get('newP');
+  if (prefill.has('day')) draftDay = Number(prefill.get('day')) || draftDay;
+  if (prefill.has('draft')) {
+    const target = Number(prefill.get('target')) || 1000;
+    pendingDraftUsernames = prefill.get('draft').split('|').filter(Boolean).map((t) => ({ names: t.split(','), target }));
+  }
+  if ([...prefill.keys()].length) history.replaceState(null, '', location.pathname);
+})();
+
 // ---------- Ableitungen ----------
 function latestDay() { return schedules.length ? Math.max(...schedules.map((s) => s.day)) : 0; }
 function usernameOf(uid) { const p = players.find((x) => x.uid === uid); return p ? p.username : '(gelöscht)'; }
@@ -156,7 +176,8 @@ const A = {
     try {
       const u = await ensureSignedIn();
       if (!isAdminUid(u.uid)) { loginErr = 'Dieser Browser ist nicht als Admin hinterlegt.'; loginBusy = false; render(); return; }
-      user = u; isAdmin = true; me = null; tab = 'plan'; loginErr = '';
+      user = u; isAdmin = true; me = null; loginErr = '';
+      if (!prefill.has('tab')) tab = 'plan';
     } catch (e) { loginErr = String(e); }
     loginBusy = false; render();
   },
@@ -456,7 +477,19 @@ document.addEventListener('change', (e) => {
 
 // ---------- Bootstrapping ----------
 (async () => {
-  watchPlayers((p) => { players = p; render(); });
+  watchPlayers((p) => {
+    players = p;
+    if (pendingDraftUsernames && draftTables.length === 0) {
+      const byName = Object.fromEntries(p.map((pl) => [pl.username.toLowerCase(), pl.uid]));
+      draftTables = pendingDraftUsernames.map((t) => ({
+        seats: t.names.map((n) => byName[n.trim().toLowerCase()] || ''),
+        target: t.target,
+      }));
+      pendingDraftUsernames = null;
+      planMsg = 'Entwurf aus Link übernommen - bitte prüfen (leere Sitze = Name nicht gefunden) und speichern.';
+    }
+    render();
+  });
   watchSchedules((s) => { schedules = s; if (!draftDay || draftDay <= Math.max(0, ...s.map((x) => x.day))) draftDay = (s.length ? Math.max(...s.map((x) => x.day)) : 0) + 1; render(); });
   watchTournamentGames((g) => { games = g; render(); });
 
@@ -469,7 +502,7 @@ document.addEventListener('change', (e) => {
       if (profile) me = { uid: existing.uid, username: profile.username };
       else { user = null; } // kein gültiges Turnier-Profil mehr (z. B. gelöscht) - zurück zum Login
     }
-    tab = isAdmin ? 'plan' : 'mine';
+    if (!prefill.has('tab')) tab = isAdmin ? 'plan' : 'mine'; // Link-Vorgabe (siehe applyPrefill) nicht überschreiben
   }
   render();
 })();
