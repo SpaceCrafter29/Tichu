@@ -80,6 +80,17 @@ service cloud.firestore {
       return g.status == 'waiting' && isFullReset(g.seats);
     }
 
+    // Turnier-Modus: ein Sitz darf nur von genau dem Account befüllt werden, dem der Admin ihn im
+    // Spielplan zugewiesen hat (games/{gameId}.seatUids, parallel zu seats gesetzt beim Anlegen
+    // des Tisches) - kein "wer zuerst kommt" wie bei Free Play. Alle anderen Sitze müssen dabei
+    // unverändert bleiben.
+    function isAssignedSeatClaim(before, after, seatUids) {
+      return (before[0] == after[0] || (before[0] == null && after[0] != null && seatUids[0] == request.auth.uid))
+        && (before[1] == after[1] || (before[1] == null && after[1] != null && seatUids[1] == request.auth.uid))
+        && (before[2] == after[2] || (before[2] == null && after[2] != null && seatUids[2] == request.auth.uid))
+        && (before[3] == after[3] || (before[3] == null && after[3] != null && seatUids[3] == request.auth.uid));
+    }
+
     // Lobby-Inaktivität: ein Mitspieler an einem NOCH WARTENDEN Tisch darf einen anderen,
     // seit über 90s nicht mehr "geheartbeateten" Sitz räumen (siehe heartbeat()/checkStaleSeats()
     // in lib/room.js) - sonst blockiert eine abwesende Person den Tisch auf unbestimmte Zeit.
@@ -101,15 +112,41 @@ service cloud.firestore {
           && get(/databases/$(database)/documents/games/$(gameId)/private/seat3).data.lastActive < request.time - duration.value(90, 's'));
     }
 
+    // Turnier-Accounts (Benutzername+Passwort, siehe lib/tournamentAuth.js) - der Benutzername
+    // selbst ist öffentlich (für Tabelle/Spielplan), nur der Admin legt Accounts an.
+    match /players/{uid} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    // Klartext-Passwörter NUR für den Admin lesbar (eigene Kopie, um sie Spielern mitteilen zu
+    // können - es gibt keine "Passwort vergessen"-E-Mail, siehe README). Wird vom Firebase-Auth-
+    // Login selbst nicht gebraucht, dient nur der Admin-Ansicht in der Accounts-Seite.
+    match /playerSecrets/{uid} {
+      allow read, write: if isAdmin();
+    }
+
+    // Täglicher Spielplan (Paarungen) - nur der Admin legt ihn fest, alle dürfen ihn (und die
+    // Historie) einsehen.
+    match /schedule/{day} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
     match /games/{gameId} {
       // Öffentlicher Spielstand (Sitz-Tokens, Stiche, Punkte, wer am Zug ist) - enthält
       // absichtlich keine uids/Anzeigenamen, ist also für alle angemeldeten Nutzer unbedenklich.
       allow read: if signedIn();
-      allow create: if signedIn();
+      // Turnier-Tische (mode:'tournament') legt nur der Admin an - die Sitze sind laut
+      // Spielplan schon vorab festgelegten Accounts zugewiesen, nicht "wer zuerst kommt" wie
+      // bei Free Play (siehe isAssignedSeatClaim() oben).
+      allow create: if signedIn() && (request.resource.data.mode != 'tournament' || isAdmin());
       // Entweder: normales Beitreten (nur freie Sitze füllen, kein Überschreiben - kein
       // "isParticipant darf alles"-Fallback, sonst könnte jeder Teilnehmer per direktem
       // Firestore-Schreibzugriff fremde Sitze überschreiben). Oder: der eigene Sitz wird
-      // wieder freigegeben (Verlassen, siehe leaveTable() in lobby.js).
+      // wieder freigegeben (Verlassen, siehe leaveTable() in lobby.js). Oder: ein Turnier-Sitz
+      // wird vom zugewiesenen Account befüllt. Oder: das Endergebnis eines beendeten
+      // Turnier-Matches wird einmalig festgehalten (siehe lib/tournament.js).
       allow update: if signedIn()
         && (
           isAdmin()
@@ -125,7 +162,14 @@ service cloud.firestore {
                 && resource.data.status == 'waiting'
                 && request.resource.data.status == 'waiting'
                 && isStaleSeatCleared(gameId, resource.data.seats, request.resource.data.seats))
+              || (resource.data.mode == 'tournament'
+                && isAssignedSeatClaim(resource.data.seats, request.resource.data.seats, resource.data.seatUids))
             ))
+          || (isParticipant(gameId)
+            && resource.data.mode == 'tournament'
+            && resource.data.result == null
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['result', 'status'])
+            && request.resource.data.status == 'finished')
         );
       // Löschen: normalerweise nur leere Tische (kein belegter Sitz) - kann also nie echte
       // Spieldaten wegwerfen, ist aber genug, um verwaiste/Test-Tische aufzuräumen. Admins

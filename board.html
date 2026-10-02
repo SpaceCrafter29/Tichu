@@ -81,6 +81,7 @@ import {
   getAllHands, dealFreshRound, postEvent, watchEvents, watchGame, leaveTable, SEAT_LABELS,
   getWinCondition, describeWinCondition,
 } from './lib/lobby.js';
+import { finishTournamentMatch } from './lib/tournament.js';
 import { Round, teamOf } from './engine/game.js';
 import { sortHand, cardPoints } from './engine/cards.js';
 import { classify, canBeat } from './engine/combos.js';
@@ -123,7 +124,7 @@ watchGame(gameId, (game) => {
       redirectingHome = true;
       const lastKick = [...events].reverse().find((e) => e.type === 'kicked');
       const notice = lastKick
-        ? `Der Tisch wurde zurückgesetzt: ${SEAT_LABELS[lastKick.seatIndex]} wurde wegen Inaktivität vom Tisch entfernt.`
+        ? `Der Tisch wurde zurückgesetzt: ${seatLabel(lastKick.seatIndex)} wurde wegen Inaktivität vom Tisch entfernt.`
         : 'Der Tisch wurde zurückgesetzt.';
       localStorage.removeItem('tichu.mySeat');
       window.location.href = `menu.html?notice=${encodeURIComponent(notice)}`;
@@ -160,6 +161,22 @@ const SPECIAL_ICON = {
 function labelFor(card) {
   if (card.special) return SPECIAL_ICON[card.special].label;
   return RANK_LABEL[card.rank] || String(card.rank);
+}
+// Im Turnier-Modus (gameMeta.mode === 'tournament') werden Sitze NICHT mit echten Namen oder
+// festen Positions-Labels (Nord/Ost/Süd/West) angezeigt, sondern nur relativ zur eigenen Person -
+// sonst könnte man per Zuruf/Chat außerhalb der App abgleichen "ich bin Nord, bist du mein
+// Mate?" und so während des Turniers Infos austauschen. In Free Play zeigen wir stattdessen den
+// echten Namen (siehe joinTable()/getAllHands() in lobby.js) - dort geht es nicht um Fairness,
+// sondern nur um die Übersicht, wer mitspielt.
+function seatLabel(seatIndex) {
+  if (gameMeta && gameMeta.mode === 'tournament') {
+    if (seatIndex === mySeat) return 'Du';
+    if (seatIndex === (mySeat + 2) % 4) return 'Partner';
+    if (seatIndex === (mySeat + 1) % 4) return 'Gegner 1';
+    return 'Gegner 2';
+  }
+  const name = initialDeal && initialDeal.displayNames && initialDeal.displayNames[seatIndex];
+  return name || SEAT_LABELS[seatIndex];
 }
 function cardEl(card, { selected = false, assigned = false, small = false, onClick = null } = {}) {
   const div = document.createElement('div');
@@ -281,6 +298,10 @@ let schupfenPendingCardId = null; // gerade angetippte, noch nicht zugeordnete K
 let errorMsg = '';
 let autoPlaying = false;
 let playAgainClicked = false;
+let tournamentResultAttempted = false; // verhindert wiederholte finishTournamentMatch()-Versuche
+// bei jedem Re-Render, sobald einmal (erfolgreich oder nicht) versucht wurde - ein doppelter
+// Schreibversuch würde ohnehin nur an der "result bereits gesetzt"-Regel scheitern, siehe
+// lib/tournament.js, soll aber nicht bei jedem Sekunden-Tick erneut angestoßen werden.
 let currentSchupfenSubs = {};
 
 // --- Zugtimer: 1 Minute pro Aktion, sonst automatischer Zug/Kick wegen Inaktivität ----------
@@ -479,7 +500,7 @@ function renderTurnTimer() {
   p.style.borderColor = '#2563eb';
   p.style.color = '#93c5fd';
   const strikes = autoStrikeCount(turnTimerActor);
-  const who = turnTimerActor === mySeat ? 'Du bist' : `${SEAT_LABELS[turnTimerActor]} ist`;
+  const who = turnTimerActor === mySeat ? 'Du bist' : `${seatLabel(turnTimerActor)} ist`;
   p.textContent = `${who} am Zug - noch ${turnRemainingSec}s, sonst automatischer Zug`
     + (strikes > 0 ? ` (${strikes}/${STRIKE_LIMIT}, danach Kick wegen Inaktivität)` : '.');
   return p;
@@ -607,7 +628,7 @@ function renderSchupfen() {
   others.forEach((targetSeat) => {
     const slot = document.createElement('div');
     slot.className = 'target-slot';
-    slot.innerHTML = `<div class="t-label">an ${SEAT_LABELS[targetSeat]}</div>`;
+    slot.innerHTML = `<div class="t-label">an ${seatLabel(targetSeat)}</div>`;
     const cardHolder = document.createElement('div');
     cardHolder.className = 't-card';
     const assignedId = schupfenDraft[targetSeat];
@@ -678,7 +699,7 @@ function renderPlaying() {
       row.className = 'row';
       for (const s of opponents) {
         const btn = document.createElement('button');
-        btn.textContent = SEAT_LABELS[s];
+        btn.textContent = seatLabel(s);
         btn.addEventListener('click', withError(async () => {
           await postEvent(gameId, mySeat, 'giveDragonTrick', { toPlayerIdx: s });
         }));
@@ -686,7 +707,7 @@ function renderPlaying() {
       }
       overlay.appendChild(row);
     } else {
-      overlay.innerHTML = `<p>${SEAT_LABELS[winner]} hat den Drachen gewonnen und vergibt den Stich…</p>`;
+      overlay.innerHTML = `<p>${seatLabel(winner)} hat den Drachen gewonnen und vergibt den Stich…</p>`;
     }
     wrap.appendChild(overlay);
   }
@@ -699,7 +720,7 @@ function renderPlaying() {
     const place = round.finishOrder.indexOf(i);
     panel.innerHTML = `
       <div class="head">
-        <span class="name">${SEAT_LABELS[i]}${i === mySeat ? ' (du)' : ''}${i === round.turn ? ' 🎯' : ''}</span>
+        <span class="name">${seatLabel(i)}${i === mySeat && !(gameMeta && gameMeta.mode === 'tournament') ? ' (du)' : ''}${i === round.turn ? ' 🎯' : ''}</span>
         <span class="meta">${round.hands[i].length} Karten</span>
       </div>
       <div>
@@ -723,9 +744,9 @@ function renderPlaying() {
   const label = document.createElement('div');
   label.className = 'trick-label';
   if (round.currentTrick.combo === null) {
-    label.textContent = `${SEAT_LABELS[round.turn]} eröffnet den Stich`;
+    label.textContent = `${seatLabel(round.turn)} eröffnet den Stich`;
   } else {
-    label.textContent = `Zuletzt: ${SEAT_LABELS[round.currentTrick.winnerIdx]} spielt ${comboLabel(round.currentTrick.combo)}`;
+    label.textContent = `Zuletzt: ${seatLabel(round.currentTrick.winnerIdx)} spielt ${comboLabel(round.currentTrick.combo)}`;
   }
   table.appendChild(label);
   const trickCards = document.createElement('div');
@@ -832,10 +853,10 @@ function renderRoundOver() {
     box.className = 'result-team';
     let rows = '';
     for (const s of teamSeats[t]) {
-      rows += `<div class="row">${SEAT_LABELS[s]}${s === mySeat ? ' (du)' : ''}: ${r.pointsPerPlayer[s]} Punkte${r.tichuBonus[s] ? ` (${r.tichuBonus[s] > 0 ? '+' : ''}${r.tichuBonus[s]} Tichu)` : ''}</div>`;
+      rows += `<div class="row">${seatLabel(s)}${s === mySeat && !(gameMeta && gameMeta.mode === 'tournament') ? ' (du)' : ''}: ${r.pointsPerPlayer[s]} Punkte${r.tichuBonus[s] ? ` (${r.tichuBonus[s] > 0 ? '+' : ''}${r.tichuBonus[s]} Tichu)` : ''}</div>`;
     }
     if (lastPlaceSeat != null && !teamSeats[t].includes(lastPlaceSeat) && lastPlaceHandPoints !== 0) {
-      rows += `<div class="row">Restkarten von ${SEAT_LABELS[lastPlaceSeat]}: ${lastPlaceHandPoints} Punkte</div>`;
+      rows += `<div class="row">Restkarten von ${seatLabel(lastPlaceSeat)}: ${lastPlaceHandPoints} Punkte</div>`;
     }
     box.innerHTML = `<h3>Team ${teamNames[t]}</h3>${rows}<div class="total">${r.teamScore[t]} Punkte</div>`;
     grid.appendChild(box);
@@ -850,6 +871,10 @@ function renderRoundOver() {
   wrap.appendChild(matchP);
 
   const matchOver = wc.type === 'rounds' ? roundsCompleted >= wc.count : (finalScore[0] >= wc.target || finalScore[1] >= wc.target);
+  if (matchOver && gameMeta && gameMeta.mode === 'tournament' && gameMeta.result == null && !tournamentResultAttempted) {
+    tournamentResultAttempted = true;
+    finishTournamentMatch(gameId, finalScore[0], finalScore[1]).catch((e) => console.warn('Turnier-Ergebnis konnte nicht gespeichert werden:', e));
+  }
   if (matchOver) {
     const winner = finalScore[0] === finalScore[1] ? null : (finalScore[0] > finalScore[1] ? 0 : 1);
     const p = document.createElement('p');

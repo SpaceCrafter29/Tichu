@@ -1,0 +1,478 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tichu-Turnier</title>
+<style>
+:root{--bg:#1a1a1a;--panel:#242424;--panel2:#1c1c1c;--text:#ededed;--muted:#9a9a9a;--accent:#ff8a34;--accent-soft:rgba(255,138,52,.16);--accent-text:#1a1200;--border:#3a3a3a;--line:#333;--ok:#86efac;--err:#ff9aa2}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+button,input,select{font:inherit}
+button{cursor:pointer;border-radius:8px;padding:11px 16px;font-size:15px;border:1px solid var(--border);background:transparent;color:var(--text)}
+button:disabled{opacity:.5;cursor:default}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-text);font-weight:600}
+button.outline-accent{border-color:var(--accent);color:var(--accent);font-weight:600}
+button.danger{color:var(--err)}
+button.sm{padding:8px 10px;font-size:13px}
+input,select{padding:11px 12px;border-radius:8px;border:1px solid var(--border);background:#141414;color:var(--text);font-size:16px;width:100%}
+select:disabled{opacity:.6}
+label{font-size:13px;color:var(--muted)}
+.field{display:flex;flex-direction:column;gap:6px}
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:20px}
+.stack{display:flex;flex-direction:column;gap:14px}
+.row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.muted{color:var(--muted)}
+.small{font-size:13px}
+.mono{font-family:ui-monospace,monospace}
+.num{font-variant-numeric:tabular-nums}
+h1{margin:0;font-size:28px}
+h2{margin:0;font-size:17px}
+.chip{font-size:13px;padding:4px 10px;border-radius:999px;background:#141414;color:var(--muted);white-space:nowrap}
+.chip.playing{background:var(--accent-soft);color:#ffb27a}
+.chip.finished{background:rgba(134,239,172,.12);color:var(--ok)}
+.pill{font-size:11px;padding:1px 7px;border-radius:999px;border:1px solid var(--border);color:var(--muted);font-weight:500;margin-left:6px}
+.msg{margin:0;padding:12px 14px;border-radius:8px;background:#202020;border:1px solid var(--line);color:var(--muted);font-size:14px}
+.msg.err{background:rgba(255,107,107,.08);border-color:#6b2229;color:var(--err)}
+.msg.ok{background:rgba(134,239,172,.08);border-color:#2f5a3c;color:var(--ok)}
+.cols{display:flex;flex-wrap:wrap;gap:20px;align-items:flex-start}
+.col-main{flex:999 1 560px;min-width:0}
+.col-side{flex:1 1 300px;min-width:0}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.grid4{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.tables{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:20px}
+.list-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 0;border-bottom:1px solid var(--line)}
+.list-row:last-child{border-bottom:none}
+.stand{display:grid;grid-template-columns:52px minmax(0,1fr) 70px 70px 56px;gap:8px;align-items:center;padding:11px 8px;border-bottom:1px solid var(--line);border-radius:6px}
+.stand.head{font-size:13px;color:var(--muted);padding-top:4px}
+.stand.me{background:rgba(255,138,52,.12)}
+.stand .r{text-align:right}
+.seat{padding:14px 10px;border-radius:8px;background:#141414;border:1px dashed #4a4a4a;text-align:center;display:flex;flex-direction:column;gap:3px;color:var(--muted)}
+.seat.ready{border:1px solid var(--accent);color:var(--text)}
+.seat.me{background:rgba(255,138,52,.18)}
+.seat b{font-weight:700}
+.today{padding:12px;border-radius:8px;background:var(--panel2);border:1px solid var(--line);display:flex;flex-direction:column;gap:6px}
+.addtable{min-height:200px;border-style:dashed;border-color:#4a4a4a;border-radius:12px}
+.d-wrap{max-width:1120px;margin:0 auto;padding:0 24px 64px}
+.d-header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px;padding:20px 0;border-bottom:1px solid var(--border)}
+.d-nav{display:flex;gap:4px;flex-wrap:wrap}
+.d-nav button{border:none;padding:10px 14px}
+.d-nav button.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+.d-title{margin:28px 0 20px}
+.back-link{color:var(--muted);text-decoration:none;font-size:14px}
+.back-link:hover{color:var(--accent)}
+@media (max-width:640px){.tables{grid-template-columns:1fr}.stand{grid-template-columns:44px minmax(0,1fr) 0 60px 46px}.stand .hide-h{display:none}}
+</style>
+</head>
+<body>
+<div id="app" class="d-wrap"><p class="muted" style="padding-top:60px">Lädt…</p></div>
+<script type="module">
+import { ensureSignedIn } from './lib/auth.js';
+import { isAdminUid } from './lib/lobby.js';
+import {
+  tournamentLogin, tournamentLogout, currentTournamentUser, getPlayerProfile,
+  adminCreatePlayer, adminDeletePlayer, adminGetPassword, ensureUserProfile,
+} from './lib/tournamentAuth.js';
+import {
+  genPassword, watchPlayers, watchSchedules, watchTournamentGames, saveSchedule,
+  joinAssignedSeat, computeStandings,
+} from './lib/tournament.js';
+
+function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function shuffled(a) { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+
+const app = document.getElementById('app');
+
+// ---------- Zustand ----------
+let user = null;       // aktuell angemeldeter Firebase-Auth-User (anonym=Admin ODER Turnier-Account)
+let isAdmin = false;
+let me = null;         // { uid, username } - nur für eingeloggte Spieler gesetzt
+let loginU = '', loginP = '', loginErr = '', loginBusy = false;
+
+let players = [];      // watchPlayers()
+let schedules = [];    // watchSchedules()
+let games = [];        // watchTournamentGames()
+
+let tab = 'plan';      // admin: accounts|plan|table   spieler: mine|table
+let newU = '', newP = genPassword(), accMsg = '', accErr = false;
+let shownPassword = null; // { uid, password }
+
+let draftDay = 1;
+let draftTables = [];  // [{ seats:[uid,uid,uid,uid], target:1000 }] - Entwurf, bis "Speichern"
+let planMsg = '';
+let autoJoinedGameId = null;
+
+// ---------- Ableitungen ----------
+function latestDay() { return schedules.length ? Math.max(...schedules.map((s) => s.day)) : 0; }
+function usernameOf(uid) { const p = players.find((x) => x.uid === uid); return p ? p.username : '(gelöscht)'; }
+function freeUidsForDraft() {
+  const used = new Set();
+  draftTables.forEach((t) => t.seats.forEach((u) => { if (u) used.add(u); }));
+  return players.map((p) => p.uid).filter((u) => !used.has(u));
+}
+function statusOf(g) {
+  const rc = g.seats.filter(Boolean).length;
+  if (g.status === 'waiting') return { label: `wartet · ${rc}/4 da`, short: 'wartet', cls: '' };
+  if (g.status === 'finished') {
+    const r = g.result || {};
+    return { label: `beendet · ${r.scoreA} : ${r.scoreB}`, short: 'beendet', cls: 'finished' };
+  }
+  return { label: 'läuft', short: 'läuft', cls: 'playing' };
+}
+function myActiveGame() {
+  if (!me) return null;
+  return games
+    .filter((g) => g.seatUids && g.seatUids.includes(me.uid) && g.status !== 'finished')
+    .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0))[0] || null;
+}
+function finishedGames() { return games.filter((g) => g.status === 'finished'); }
+function todaysGames() {
+  const sched = schedules.find((s) => s.day === latestDay());
+  if (!sched) return [];
+  const ids = new Set(sched.tables.map((t) => t.gameId));
+  return games.filter((g) => ids.has(g.id));
+}
+
+// ---------- Aktionen ----------
+const A = {
+  login: async () => {
+    const u = loginU.trim(), p = loginP;
+    if (!u || !p) { loginErr = 'Benutzername und Passwort eingeben.'; render(); return; }
+    loginBusy = true; render();
+    try {
+      const cred = await tournamentLogin(u, p);
+      await ensureUserProfile(cred.uid, u);
+      const profile = await getPlayerProfile(cred.uid);
+      me = { uid: cred.uid, username: profile ? profile.username : u };
+      user = cred; isAdmin = isAdminUid(cred.uid);
+      loginErr = ''; loginP = ''; tab = isAdmin ? 'plan' : 'mine';
+    } catch (e) {
+      loginErr = 'Benutzername oder Passwort falsch.';
+    }
+    loginBusy = false; render();
+  },
+  adminLogin: async () => {
+    loginBusy = true; render();
+    try {
+      const u = await ensureSignedIn();
+      if (!isAdminUid(u.uid)) { loginErr = 'Dieser Browser ist nicht als Admin hinterlegt.'; loginBusy = false; render(); return; }
+      user = u; isAdmin = true; me = null; tab = 'plan'; loginErr = '';
+    } catch (e) { loginErr = String(e); }
+    loginBusy = false; render();
+  },
+  logout: async () => {
+    await tournamentLogout().catch(() => {});
+    user = null; isAdmin = false; me = null; loginU = ''; loginP = ''; render();
+  },
+  tab: (k) => { tab = k; window.scrollTo(0, 0); render(); },
+
+  addAccount: async () => {
+    const u = newU.trim().toLowerCase(), p = newP.trim();
+    if (!/^[a-z0-9_.-]{2,20}$/.test(u)) { accMsg = 'Benutzername: 2–20 Zeichen (a–z, 0–9, . _ -).'; accErr = true; render(); return; }
+    if (players.some((x) => x.username.toLowerCase() === u)) { accMsg = `„${u}“ gibt es schon.`; accErr = true; render(); return; }
+    if (p.length < 4) { accMsg = 'Passwort: mindestens 4 Zeichen.'; accErr = true; render(); return; }
+    try {
+      await adminCreatePlayer(u, p);
+      newU = ''; newP = genPassword(); accMsg = `Account „${u}“ angelegt.`; accErr = false;
+    } catch (e) {
+      accMsg = 'Fehler: ' + (e.message || e); accErr = true;
+    }
+    render();
+  },
+  genPw: () => { newP = genPassword(); render(); },
+  showPw: async (uid) => {
+    const password = await adminGetPassword(uid);
+    shownPassword = { uid, password };
+    render();
+  },
+  delAccount: async (uid) => {
+    if (games.some((g) => g.status !== 'finished' && g.seatUids && g.seatUids.includes(uid))) {
+      accMsg = usernameOf(uid) + ' sitzt heute an einem aktiven Tisch – erst den Spielplan ändern.'; accErr = true; render(); return;
+    }
+    if (!confirm(`Account „${usernameOf(uid)}“ wirklich löschen?`)) return;
+    await adminDeletePlayer(uid);
+    accMsg = 'Account gelöscht.'; accErr = false; render();
+  },
+
+  addTable: () => {
+    const free = freeUidsForDraft();
+    draftTables.push({ seats: [free[0] || '', free[1] || '', free[2] || '', free[3] || ''], target: 1000 });
+    planMsg = 'Neuer Tisch – noch nicht gespeichert.'; render();
+  },
+  removeTable: (i) => { draftTables.splice(+i, 1); planMsg = 'Tisch entfernt.'; render(); },
+  shuffleTables: () => {
+    const pool = shuffled(players.map((p) => p.uid));
+    const n = Math.floor(pool.length / 4);
+    draftTables = [];
+    for (let k = 0; k < n; k++) draftTables.push({ seats: pool.slice(k * 4, k * 4 + 4), target: 1000 });
+    planMsg = n ? 'Ausgelost – noch nicht gespeichert.' : 'Fehler: Mindestens 4 Accounts nötig.';
+    render();
+  },
+  save: async () => {
+    const errs = [];
+    if (!draftTables.length) errs.push('Kein Tisch angelegt.');
+    const seen = {};
+    draftTables.forEach((t, i) => {
+      if (t.seats.some((x) => !x)) errs.push('Tisch ' + (i + 1) + ': nicht alle 4 Sitze belegt.');
+      t.seats.forEach((u) => { if (!u) return; if (seen[u] !== undefined) errs.push(usernameOf(u) + ' sitzt an mehreren Tischen.'); else seen[u] = i; });
+    });
+    if (errs.length) { planMsg = 'Fehler: ' + errs[0]; render(); return; }
+    try {
+      await saveSchedule(draftDay, draftTables.map((t) => ({ seatUids: t.seats, winCondition: { type: 'points', target: t.target } })));
+      planMsg = `Gespeichert – ${draftTables.length} Turnier-Tisch${draftTables.length > 1 ? 'e' : ''} erzeugt.`;
+      draftTables = [];
+    } catch (e) {
+      planMsg = 'Fehler beim Speichern: ' + (e.message || e);
+    }
+    render();
+  },
+  nextDay: () => { draftDay = latestDay() + 1; draftTables = []; planMsg = `Spieltag ${draftDay}: Paarungen festlegen oder auslosen.`; render(); },
+
+  goBoard: (gameId) => {
+    const g = games.find((x) => x.id === gameId);
+    if (!g || !me) return;
+    const seatIndex = g.seatUids.indexOf(me.uid);
+    localStorage.setItem('tichu.mySeat', JSON.stringify({ gameId, seatIndex }));
+    window.location.href = `board.html?g=${gameId}`;
+  },
+};
+
+// ---------- Views ----------
+function loginView() {
+  return `<div class="stack" style="max-width:420px;margin:0 auto;padding:72px 0 48px;gap:22px">
+    <div class="stack" style="gap:6px"><h1 style="font-size:32px">Tichu-Turnier</h1><p class="muted" style="margin:0;font-size:16px">Login mit deinem Turnier-Account.</p></div>
+    <form class="panel stack" data-submit="login">
+      <div class="field"><label for="lu">Benutzername</label><input id="lu" data-bind="loginU" autocomplete="username" value="${esc(loginU)}"></div>
+      <div class="field"><label for="lp">Passwort</label><input id="lp" type="password" data-bind="loginP" autocomplete="current-password" value="${esc(loginP)}"></div>
+      ${loginErr ? `<p role="alert" style="margin:0;color:var(--err);font-size:14px">${esc(loginErr)}</p>` : ''}
+      <button class="primary" type="submit" ${loginBusy ? 'disabled' : ''}>Anmelden</button>
+    </form>
+    <div class="stack" style="gap:10px;align-items:center;text-align:center">
+      <span class="small muted">Account vergessen? Frag den Turnier-Admin.</span>
+      <a href="menu.html" class="back-link">Nur locker spielen? Free Play ohne Account →</a>
+      <button type="button" class="sm" data-act="adminLogin" style="margin-top:8px">Als Admin anmelden</button>
+    </div>
+  </div>`;
+}
+
+function accountsView() {
+  const form = `<section class="panel stack col-side">
+    <h2>Neuer Account</h2>
+    <div class="field"><label for="nu">Benutzername</label><input id="nu" data-bind="newU" placeholder="z. B. ida" value="${esc(newU)}"></div>
+    <div class="field"><label for="np">Passwort</label><div style="display:flex;gap:8px"><input id="np" class="mono" data-bind="newP" value="${esc(newP)}"><button type="button" data-act="genPw">Neu</button></div><span class="small muted">Gib es dem Spieler persönlich weiter.</span></div>
+    <button class="primary" data-act="addAccount">Account anlegen</button>
+    ${accMsg ? `<p role="status" style="margin:0;font-size:14px;color:${accErr ? 'var(--err)' : 'var(--ok)'}">${esc(accMsg)}</p>` : ''}
+  </section>`;
+  const list = `<section class="panel col-main" style="padding-top:8px;padding-bottom:8px">
+    <div class="row" style="padding:8px 0 4px"><h2>Alle Accounts</h2><span class="small muted">${players.length} Accounts</span></div>
+    ${players.map((p) => {
+      const active = games.find((g) => g.status !== 'finished' && g.seatUids && g.seatUids.includes(p.uid));
+      const pw = shownPassword && shownPassword.uid === p.uid ? shownPassword.password : null;
+      return `<div class="list-row"><div style="display:flex;flex-direction:column;gap:2px;min-width:0">
+          <b>${esc(p.username)}</b>
+          <span class="small muted mono">${pw ? esc(pw) : '•••••••'} · ${active ? 'aktiv' : 'frei'}</span>
+        </div>
+        <div style="display:flex;gap:6px;flex-shrink:0">
+          <button class="sm" data-act="showPw" data-a="${esc(p.uid)}">Passwort zeigen</button>
+          <button class="sm danger" data-act="delAccount" data-a="${esc(p.uid)}">Löschen</button>
+        </div></div>`;
+    }).join('')}
+  </section>`;
+  return `<div class="cols">${form}${list}</div>`;
+}
+
+function planView() {
+  const cls = planMsg.indexOf('Fehler') === 0 ? 'err' : planMsg.indexOf('Gespeichert') === 0 ? 'ok' : '';
+  const opts = [''].concat(players.map((p) => p.uid));
+  const cards = draftTables.map((t, i) => {
+    const seats = t.seats.map((uid, si) => {
+      let o = opts.slice(); if (uid && !o.includes(uid)) o.push(uid);
+      return `<div class="field"><label>Sitz ${si + 1} · Team ${si % 2 === 0 ? 'A' : 'B'}</label>
+        <select data-seat="${i},${si}">${o.map((u) => `<option value="${esc(u)}" ${u === uid ? 'selected' : ''}>${u ? esc(usernameOf(u)) : '– leer –'}</option>`).join('')}</select></div>`;
+    }).join('');
+    return `<section class="panel stack">
+      <div class="row"><h2 style="font-size:18px">Tisch ${i + 1}</h2></div>
+      <div class="grid2">${seats}</div>
+      <div class="row"><label style="font-size:14px">Match-Ende</label><select data-target="${i}" style="width:auto;padding:8px">
+        <option value="500" ${t.target === 500 ? 'selected' : ''}>500 Punkte</option>
+        <option value="1000" ${t.target === 1000 ? 'selected' : ''}>1000 Punkte</option></select></div>
+      <button class="sm danger" data-act="removeTable" data-a="${i}">Tisch entfernen</button>
+    </section>`;
+  }).join('');
+  const todays = todaysGames();
+  const existingCards = todays.map((g) => {
+    const st = statusOf(g);
+    return `<section class="panel stack"><div class="row"><h2 style="font-size:18px">${esc(g.name || g.id)}</h2><span class="chip ${st.cls}">${st.label}</span></div>
+      <div class="grid2">${g.seatUids.map((uid, si) => `<div class="seat${g.seats[si] ? ' ready' : ''}"><b>${esc(usernameOf(uid))}</b><span class="small muted">${g.seats[si] ? 'da' : 'noch nicht da'}</span></div>`).join('')}</div>
+    </section>`;
+  }).join('');
+  const free = freeUidsForDraft();
+  return (planMsg ? `<p role="status" class="msg ${cls}" style="margin-bottom:16px">${esc(planMsg)}</p>` : '') +
+    (existingCards ? `<h2 style="margin:0 0 12px">Bereits erzeugte Tische (Spieltag ${latestDay()})</h2><div class="tables" style="margin-bottom:24px">${existingCards}</div>` : '') +
+    `<h2 style="margin:0 0 12px">Neuer Entwurf · Spieltag ${draftDay}</h2>
+    <div class="tables">${cards}<button class="addtable" data-act="addTable">+ Tisch hinzufügen</button></div>
+    <div class="panel row" style="margin-top:20px;padding:16px 20px">
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <span>${free.length ? 'Nicht eingeteilt: ' + esc(free.map(usernameOf).join(', ')) : players.length ? 'Alle ' + players.length + ' Accounts eingeteilt' : 'Noch keine Accounts angelegt'}</span>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button data-act="nextDay">Neuer Spieltag</button>
+        <button data-act="shuffleTables">Zufällig auslosen</button>
+        <button class="primary" data-act="save">Speichern &amp; Tische erzeugen</button>
+      </div>
+    </div>`;
+}
+
+function standingsTable(compact) {
+  const st = computeStandings(players, finishedGames());
+  if (compact) {
+    return st.map((r) => `<div style="display:grid;grid-template-columns:36px minmax(0,1fr) 32px;gap:6px;padding:8px 6px;border-radius:6px;${me && r.uid === me.uid ? 'background:rgba(255,138,52,.12)' : ''}">
+      <b style="color:${r.place === 1 ? 'var(--accent)' : 'var(--text)'}">${r.place}.</b><b>${esc(r.name)}</b><b class="num" style="text-align:right">${r.wins}</b></div>`).join('');
+  }
+  return `<div class="stand head"><span>Platz</span><span>Spieler</span><span class="r hide-h">Niederl.</span><span class="r">Matches</span><span class="r">Siege</span></div>` +
+    st.map((r) => `<div class="stand${me && r.uid === me.uid ? ' me' : ''}">
+      <b class="num" style="color:${r.place === 1 ? 'var(--accent)' : 'var(--text)'}">${r.place}.</b>
+      <span style="font-weight:600;min-width:0">${esc(r.name)}${r.shared ? '<span class="pill">geteilt</span>' : ''}</span>
+      <span class="r muted num hide-h">${r.losses}</span><span class="r muted num">${r.matches}</span><b class="r num" style="font-size:18px">${r.wins}</b></div>`).join('');
+}
+
+function standingsView() {
+  const todays = todaysGames();
+  const today = todays.map((g) => {
+    const st = statusOf(g);
+    const names = g.seatUids.map(usernameOf);
+    return `<div class="today"><div class="row"><b>${esc(g.name || g.id)}</b><span class="small" style="color:${st.cls === 'playing' ? '#ffb27a' : st.cls === 'finished' ? 'var(--ok)' : 'var(--muted)'}">${st.short}</span></div>
+      <div class="row"><span>${esc(names[0] + ' + ' + names[2])}</span><span class="num">${g.result ? g.result.scoreA : '–'}</span></div>
+      <div class="row"><span>${esc(names[1] + ' + ' + names[3])}</span><span class="num">${g.result ? g.result.scoreB : '–'}</span></div></div>`;
+  }).join('');
+  const history = finishedGames().slice().reverse().slice(0, 8).map((g) => {
+    const names = g.seatUids.map(usernameOf);
+    const aWon = g.result.winnerTeam === 'A';
+    const winners = aWon ? [names[0], names[2]] : [names[1], names[3]];
+    const losers = aWon ? [names[1], names[3]] : [names[0], names[2]];
+    return `<div class="list-row small" style="font-size:14px"><span><b>${esc(winners.join(' + '))}</b> <span class="muted">vs. ${esc(losers.join(' + '))}</span></span>
+      <span class="muted" style="white-space:nowrap">${Math.max(g.result.scoreA, g.result.scoreB)}:${Math.min(g.result.scoreA, g.result.scoreB)}</span></div>`;
+  }).join('');
+  return `<div class="cols">
+    <section class="panel col-main" style="padding-top:12px">${standingsTable(false)}<p class="small muted" style="margin:12px 0 0">Live aus ${finishedGames().length} gewerteten Matches · 1 Sieg = 1 Punkt · Gleichstand = geteilter Platz</p></section>
+    <div class="col-side stack" style="gap:16px">
+      <section class="panel stack" style="gap:12px"><h2>Heute · Spieltag ${latestDay() || '–'}</h2>${today || '<p class="small muted" style="margin:0">Spielplan noch nicht veröffentlicht.</p>'}</section>
+      ${history ? `<section class="panel" style="padding-top:16px;padding-bottom:8px"><h2 style="margin-bottom:6px">Letzte Ergebnisse</h2>${history}</section>` : ''}
+    </div></div>`;
+}
+
+function mineView() {
+  const g = myActiveGame();
+  let body;
+  if (!g) {
+    body = `<section class="panel stack" style="gap:8px"><h2 style="font-size:20px">Heute kein Tisch</h2><p class="muted" style="margin:0">Der Admin hat dich noch nicht eingeteilt oder den Spielplan noch nicht gespeichert.</p></section>`;
+  } else {
+    const seatIndex = g.seatUids.indexOf(me.uid);
+    if (g.seats[seatIndex] == null && autoJoinedGameId !== g.id) {
+      autoJoinedGameId = g.id;
+      joinAssignedSeat(g.id, me.uid).then(render).catch((e) => { planMsg = String(e); render(); });
+    }
+    const st = statusOf(g);
+    if (g.status === 'waiting') {
+      const rel = [['Du', seatIndex], ['Partner', (seatIndex + 2) % 4], ['Gegner 1', (seatIndex + 1) % 4], ['Gegner 2', (seatIndex + 3) % 4]];
+      body = `<section class="panel stack" style="border-color:var(--accent)">
+        <div class="row"><h2 style="font-size:20px">Dein Tisch heute</h2><span class="small muted">Ziel ${g.winCondition ? g.winCondition.target : 1000}</span></div>
+        <p class="muted" style="margin:0">Warte auf Mitspieler … ${g.seats.filter(Boolean).length} von 4 da</p>
+        <div class="grid4">${rel.map(([label, si]) => `<div class="seat${g.seats[si] ? ' ready' : ''}${label === 'Du' ? ' me' : ''}"><b>${label}</b><span class="small muted">${g.seats[si] ? 'bereit' : 'noch nicht da'}</span></div>`).join('')}</div>
+        <span class="small muted">Automatisch zugewiesen. In der Partie siehst du keine Namen – nur Du, Partner und Gegner.</span></section>`;
+    } else if (g.status === 'finished') {
+      const aWon = g.result.winnerTeam === 'A';
+      const mineA = seatIndex % 2 === 0;
+      const won = mineA === aWon;
+      body = `<section class="panel stack" style="gap:16px"><div class="stack" style="gap:4px"><span class="small muted">Match beendet</span><h2 style="font-size:26px">${won ? 'Ihr habt gewonnen' : 'Verloren'}</h2></div>
+        <div class="grid2"><div class="panel${won ? '' : ''}" style="border-color:${won ? 'var(--accent)' : 'var(--border)'}"><b>Du + Partner</b><br><span class="num" style="font-size:28px">${mineA ? g.result.scoreA : g.result.scoreB}</span></div>
+        <div class="panel" style="border-color:${!won ? 'var(--accent)' : 'var(--border)'}"><b>Gegner 1 + 2</b><br><span class="num" style="font-size:28px">${mineA ? g.result.scoreB : g.result.scoreA}</span></div></div>
+        <p class="small muted" style="margin:0">Ergebnis gespeichert - steht schon in der Tabelle.</p></section>`;
+    } else {
+      body = `<section class="panel stack" style="gap:16px"><h2 style="font-size:20px">Karten sind ausgeteilt</h2>
+        <p class="muted" style="margin:0">Alle vier da - das Match läuft im Spielbrett.</p>
+        <button class="primary" data-act="goBoard" data-a="${esc(g.id)}">Zum Spielbrett</button></section>`;
+    }
+  }
+  const myStanding = computeStandings(players, finishedGames()).find((r) => r.uid === me.uid);
+  const bilanz = myStanding ? `${myStanding.wins} Siege · Platz ${myStanding.place}` : '–';
+  return `<div class="cols"><div class="col-main stack">${body}</div>
+    <aside class="panel col-side" style="padding:16px 18px"><div class="row" style="margin-bottom:6px"><h2>Tabelle</h2><span class="small muted">Du: ${bilanz}</span></div>${standingsTable(true)}</aside></div>`;
+}
+
+function tabsDef() {
+  return isAdmin ? [['table', 'Tabelle'], ['plan', 'Spielplan'], ['accounts', 'Accounts']] : [['mine', 'Mein Tisch'], ['table', 'Tabelle']];
+}
+function titleFor(k) {
+  return {
+    accounts: ['Accounts', 'Ein Login pro Spieler – gilt für Tracker und Turnier-Modus der Tichu-App.'],
+    plan: ['Spielplan', '4 Accounts pro Tisch. Speichern erzeugt die Turnier-Tische in der App – Sitze fest zugeordnet.'],
+    table: ['Turnier-Tabelle', 'Live aus allen abgeschlossenen Turnier-Matches.'],
+    mine: ['Turnier', `Angemeldet als ${me ? me.username : ''}.`],
+  }[k];
+}
+function contentFor(k) { return { accounts: accountsView, plan: planView, table: standingsView, mine: mineView }[k](); }
+
+function render() {
+  if (!user) { app.innerHTML = loginView(); return; }
+  const k = tabsDef().some(([key]) => key === tab) ? tab : tabsDef()[0][0];
+  const tt = titleFor(k);
+  const tabBtns = tabsDef().map(([key, label]) => `<button type="button" data-act="tab" data-a="${key}" ${key === k ? 'class="on" aria-current="page"' : ''}>${label}</button>`).join('');
+  app.innerHTML = `<header class="d-header"><div style="display:flex;align-items:baseline;gap:12px"><b style="font-size:20px">Tichu-Turnier</b></div>
+    <nav class="d-nav" aria-label="Bereiche">${tabBtns}</nav>
+    <div style="display:flex;align-items:center;gap:10px" class="small muted">${isAdmin ? 'Admin' : esc(me ? me.username : '')}<button class="sm" data-act="logout">Abmelden</button></div></header>
+    <div class="d-title"><h1>${esc(tt[0])}</h1><p class="muted" style="margin:6px 0 0">${esc(tt[1])}</p></div>
+    ${contentFor(k)}`;
+}
+
+// ---------- Events ----------
+document.addEventListener('click', (e) => {
+  const el = e.target.closest('[data-act]'); if (!el) return;
+  e.preventDefault();
+  A[el.dataset.act](el.dataset.a);
+});
+document.addEventListener('submit', (e) => {
+  const f = e.target.closest('[data-submit]'); if (!f) return;
+  e.preventDefault(); A[f.dataset.submit]();
+});
+document.addEventListener('input', (e) => {
+  const k = e.target.dataset && e.target.dataset.bind;
+  if (k === 'loginU') loginU = e.target.value;
+  else if (k === 'loginP') loginP = e.target.value;
+  else if (k === 'newU') newU = e.target.value;
+  else if (k === 'newP') newP = e.target.value;
+});
+document.addEventListener('change', (e) => {
+  const d = e.target.dataset || {};
+  if (d.seat) {
+    const [ti, si] = d.seat.split(',').map(Number);
+    draftTables[ti].seats[si] = e.target.value;
+    planMsg = 'Geändert – noch nicht gespeichert.'; render();
+  } else if (d.target) {
+    draftTables[+d.target].target = +e.target.value;
+    planMsg = 'Geändert – noch nicht gespeichert.'; render();
+  }
+});
+
+// ---------- Bootstrapping ----------
+(async () => {
+  watchPlayers((p) => { players = p; render(); });
+  watchSchedules((s) => { schedules = s; if (!draftDay || draftDay <= Math.max(0, ...s.map((x) => x.day))) draftDay = (s.length ? Math.max(...s.map((x) => x.day)) : 0) + 1; render(); });
+  watchTournamentGames((g) => { games = g; render(); });
+
+  const existing = await currentTournamentUser();
+  if (existing) {
+    user = existing;
+    isAdmin = isAdminUid(existing.uid);
+    if (!isAdmin) {
+      const profile = await getPlayerProfile(existing.uid);
+      if (profile) me = { uid: existing.uid, username: profile.username };
+      else { user = null; } // kein gültiges Turnier-Profil mehr (z. B. gelöscht) - zurück zum Login
+    }
+    tab = isAdmin ? 'plan' : 'mine';
+  }
+  render();
+})();
+</script>
+</body>
+</html>
