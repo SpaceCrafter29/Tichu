@@ -75,7 +75,7 @@ import {
 } from './lib/tournamentAuth.js';
 import {
   genPassword, watchPlayers, watchSchedules, watchTournamentGames, saveSchedule,
-  joinAssignedSeat, computeStandings, nextRoundTables, winningPair,
+  joinAssignedSeat, computeStandings,
 } from './lib/tournament.js';
 
 function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
@@ -98,7 +98,7 @@ let newU = '', newP = genPassword(), accMsg = '', accErr = false;
 let shownPassword = null; // { uid, password }
 
 let draftDay = 1;
-let draftTables = [];  // [{ seats:[uid,uid,uid,uid], target:1000 }] - Entwurf, bis "Speichern"
+let draftTables = [];  // [{ seats:[uid,uid,uid,uid], target:1000 }] oder Turnierbaum-Tisch { derived:[gameId,gameId], seats:[], target } - Entwurf, bis "Speichern"
 let planMsg = '';
 let autoJoinedGameId = null;
 
@@ -158,6 +158,14 @@ function todaysGamesInOrder() {
   const sched = schedules.find((s) => s.day === latestDay());
   if (!sched) return [];
   return sched.tables.map((t) => games.find((g) => g.id === t.gameId)).filter(Boolean);
+}
+// "Tisch 2 (Spieltag 1)" statt einer gameId.
+function tableLabel(gameId) {
+  for (const s of schedules) {
+    const i = s.tables.findIndex((t) => t.gameId === gameId);
+    if (i !== -1) return `Tisch ${i + 1} (Spieltag ${s.day})`;
+  }
+  return 'unbekannter Tisch';
 }
 
 // ---------- Aktionen ----------
@@ -246,7 +254,10 @@ const A = {
     });
     if (errs.length) { planMsg = 'Fehler: ' + errs[0]; render(); return; }
     try {
-      await saveSchedule(draftDay, draftTables.map((t) => ({ seatUids: t.seats, winCondition: { type: 'points', target: t.target } })));
+      await saveSchedule(draftDay, draftTables.map((t) => ({
+        ...(t.derived ? { sourceGameIds: t.derived } : { seatUids: t.seats }),
+        winCondition: { type: 'points', target: t.target },
+      })));
       planMsg = `Gespeichert – ${draftTables.length} Turnier-Tisch${draftTables.length > 1 ? 'e' : ''} erzeugt.`;
       draftTables = [];
     } catch (e) {
@@ -255,22 +266,22 @@ const A = {
     render();
   },
   nextDay: () => { draftDay = latestDay() + 1; draftTables = []; planMsg = `Spieltag ${draftDay}: Paarungen festlegen oder auslosen.`; render(); },
-  // Turnierbaum: aus den Gewinnern der aktuellen Runde die nächste Runde vorbereiten (siehe
-  // nextRoundTables() in lib/tournament.js - je zwei Tische mischen ihre Gewinner-Teams zu
-  // neuen Teams). Nur ein Vorschlag im Entwurf, der Admin kann vor dem Speichern noch alles
-  // über die normalen Sitz-Dropdowns ändern.
+  // Turnierbaum: die nächste Runde schon VOR den Ergebnissen anlegen. Je zwei aufeinanderfolgende
+  // Tische der aktuellen Runde ergeben einen neuen Tisch, dessen Besetzung sich erst aus ihren
+  // Gewinnern ergibt (gemischt: je eine Person aus jedem Gewinner-Paar bildet ein neues Team,
+  // siehe resolveSeatUids() in lib/tournament.js). Der Tisch existiert ab dem Speichern, bleibt
+  // aber gesperrt, bis beide Quell-Tische entschieden sind - danach dürfen genau die vier
+  // Gewinner hinein, ohne dass jemand (auch die Admin nicht) noch etwas tun muss.
   advanceRound: () => {
     const current = todaysGamesInOrder();
-    if (!current.length || current.some((g) => g.status !== 'finished')) {
-      planMsg = 'Fehler: Noch nicht alle Tische dieser Runde sind beendet.'; render(); return;
-    }
-    const next = nextRoundTables(current);
-    if (!next.length) { planMsg = 'Fehler: Kein Gewinner-Team ermittelbar (unentschieden?).'; render(); return; }
+    if (current.length < 2) { planMsg = 'Fehler: Für den Turnierbaum braucht es mindestens 2 Tische in der aktuellen Runde.'; render(); return; }
+    const derived = [];
+    for (let i = 0; i + 1 < current.length; i += 2) derived.push({ derived: [current[i].id, current[i + 1].id], seats: [], target: 500 });
     draftDay = latestDay() + 1;
-    draftTables = next.map((t) => ({ seats: t.seats, target: 500 }));
-    planMsg = next.length === 1
-      ? `Finale vorbereitet (Spieltag ${draftDay}) - Teams gemischt aus den beiden Gewinnern. Bitte prüfen und speichern.`
-      : `Nächste Runde vorbereitet (Spieltag ${draftDay}) - bitte prüfen und speichern.`;
+    draftTables = derived;
+    planMsg = (current.length % 2 ? 'Hinweis: Ungerade Tischzahl - der letzte Tisch hat kein Gegenstück und muss von Hand eingeteilt werden. ' : '')
+      + (derived.length === 1 ? `Finale vorbereitet (Spieltag ${draftDay}).` : `Nächste Runde vorbereitet (Spieltag ${draftDay}).`)
+      + ' Bitte prüfen und speichern.';
     render();
   },
 
@@ -331,6 +342,16 @@ function planView() {
   const cls = planMsg.indexOf('Fehler') === 0 ? 'err' : planMsg.indexOf('Gespeichert') === 0 ? 'ok' : '';
   const opts = [''].concat(players.map((p) => p.uid));
   const cards = draftTables.map((t, i) => {
+    if (t.derived) {
+      return `<section class="panel stack" style="border-color:var(--accent)">
+        <div class="row"><h2 style="font-size:18px">Tisch ${i + 1}</h2><span class="chip">Turnierbaum</span></div>
+        <p class="muted" style="margin:0;font-size:14px">Gewinner von ${esc(tableLabel(t.derived[0]))} + ${esc(tableLabel(t.derived[1]))}, neu gemischt: je ein Spieler aus jedem Gewinner-Paar bildet ein Team. Die Sitze werden automatisch festgelegt, sobald beide Tische entschieden sind - vorher kommt niemand hinein.</p>
+        <div class="row"><label style="font-size:14px">Match-Ende</label><select data-target="${i}" style="width:auto;padding:8px">
+          <option value="500" ${t.target === 500 ? 'selected' : ''}>500 Punkte</option>
+          <option value="1000" ${t.target === 1000 ? 'selected' : ''}>1000 Punkte</option></select></div>
+        <button class="sm danger" data-act="removeTable" data-a="${i}">Tisch entfernen</button>
+      </section>`;
+    }
     const seats = t.seats.map((uid, si) => {
       let o = opts.slice(); if (uid && !o.includes(uid)) o.push(uid);
       return `<div class="field"><label>Sitz ${si + 1} · Team ${si % 2 === 0 ? 'A' : 'B'}</label>
@@ -349,14 +370,15 @@ function planView() {
   const existingCards = todays.map((g) => {
     const st = statusOf(g);
     return `<section class="panel stack"><div class="row"><h2 style="font-size:18px">${esc(g.name || g.id)}</h2><span class="chip ${st.cls}">${st.label}</span></div>
-      <div class="grid2">${g.seatUids.map((uid, si) => `<div class="seat${g.seats[si] ? ' ready' : ''}"><b>${esc(usernameOf(uid))}</b><span class="small muted">${g.seats[si] ? 'da' : 'noch nicht da'}</span></div>`).join('')}</div>
+      ${g.seatUids
+        ? `<div class="grid2">${g.seatUids.map((uid, si) => `<div class="seat${g.seats[si] ? ' ready' : ''}"><b>${esc(usernameOf(uid))}</b><span class="small muted">${g.seats[si] ? 'da' : 'noch nicht da'}</span></div>`).join('')}</div>`
+        : `<p class="muted" style="margin:0;font-size:14px">Gesperrt - wird freigegeben, sobald ${esc((g.sourceGameIds || []).map(tableLabel).join(' und '))} entschieden sind.</p>`}
     </section>`;
   }).join('');
   const free = freeUidsForDraft();
-  const roundDone = todays.length >= 2 && todays.every((g) => g.status === 'finished');
   const advanceBtn = existingCards
-    ? `<div class="row" style="margin:${existingCards ? '-4px' : '0'} 0 12px"><h2 style="margin:0">Bereits erzeugte Tische (Spieltag ${latestDay()})</h2>
-        ${roundDone ? `<button class="outline-accent sm" data-act="advanceRound">Turnierbaum: nächste Runde vorbereiten</button>` : ''}</div>`
+    ? `<div class="row" style="margin:-4px 0 12px"><h2 style="margin:0">Bereits erzeugte Tische (Spieltag ${latestDay()})</h2>
+        ${todays.length >= 2 ? `<button class="outline-accent sm" data-act="advanceRound">Turnierbaum: Finale / nächste Runde anlegen</button>` : ''}</div>`
     : '';
   return (planMsg ? `<p role="status" class="msg ${cls}" style="margin-bottom:16px">${esc(planMsg)}</p>` : '') +
     (existingCards ? `${advanceBtn}<div class="tables" style="margin-bottom:24px">${existingCards}</div>` : '') +
@@ -391,6 +413,10 @@ function standingsView() {
   const todays = todaysGames();
   const today = todays.map((g) => {
     const st = statusOf(g);
+    if (!g.seatUids) {
+      return `<div class="today"><div class="row"><b>${esc(g.name || g.id)}</b><span class="small muted">gesperrt</span></div>
+        <span class="small muted">Wartet auf ${esc((g.sourceGameIds || []).map(tableLabel).join(' und '))}</span></div>`;
+    }
     const names = g.seatUids.map(usernameOf);
     return `<div class="today"><div class="row"><b>${esc(g.name || g.id)}</b><span class="small" style="color:${st.cls === 'playing' ? '#ffb27a' : st.cls === 'finished' ? 'var(--ok)' : 'var(--muted)'}">${st.short}</span></div>
       <div class="row"><span>${esc(names[0] + ' + ' + names[2])}</span><span class="num">${g.result ? g.result.scoreA : '–'}</span></div>
