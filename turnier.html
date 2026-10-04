@@ -75,7 +75,7 @@ import {
 } from './lib/tournamentAuth.js';
 import {
   genPassword, watchPlayers, watchSchedules, watchTournamentGames, saveSchedule,
-  joinAssignedSeat, computeStandings,
+  joinAssignedSeat, computeStandings, nextRoundTables, winningPair,
 } from './lib/tournament.js';
 
 function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
@@ -151,6 +151,13 @@ function todaysGames() {
   if (!sched) return [];
   const ids = new Set(sched.tables.map((t) => t.gameId));
   return games.filter((g) => ids.has(g.id));
+}
+// Für den Turnierbaum: dieselben Tische wie todaysGames(), aber in der Reihenfolge des
+// Spielplans (wichtig für nextRoundTables() - Tisch 1 trifft auf Tisch 2, Tisch 3 auf Tisch 4, …).
+function todaysGamesInOrder() {
+  const sched = schedules.find((s) => s.day === latestDay());
+  if (!sched) return [];
+  return sched.tables.map((t) => games.find((g) => g.id === t.gameId)).filter(Boolean);
 }
 
 // ---------- Aktionen ----------
@@ -248,6 +255,24 @@ const A = {
     render();
   },
   nextDay: () => { draftDay = latestDay() + 1; draftTables = []; planMsg = `Spieltag ${draftDay}: Paarungen festlegen oder auslosen.`; render(); },
+  // Turnierbaum: aus den Gewinnern der aktuellen Runde die nächste Runde vorbereiten (siehe
+  // nextRoundTables() in lib/tournament.js - je zwei Tische mischen ihre Gewinner-Teams zu
+  // neuen Teams). Nur ein Vorschlag im Entwurf, der Admin kann vor dem Speichern noch alles
+  // über die normalen Sitz-Dropdowns ändern.
+  advanceRound: () => {
+    const current = todaysGamesInOrder();
+    if (!current.length || current.some((g) => g.status !== 'finished')) {
+      planMsg = 'Fehler: Noch nicht alle Tische dieser Runde sind beendet.'; render(); return;
+    }
+    const next = nextRoundTables(current);
+    if (!next.length) { planMsg = 'Fehler: Kein Gewinner-Team ermittelbar (unentschieden?).'; render(); return; }
+    draftDay = latestDay() + 1;
+    draftTables = next.map((t) => ({ seats: t.seats, target: 500 }));
+    planMsg = next.length === 1
+      ? `Finale vorbereitet (Spieltag ${draftDay}) - Teams gemischt aus den beiden Gewinnern. Bitte prüfen und speichern.`
+      : `Nächste Runde vorbereitet (Spieltag ${draftDay}) - bitte prüfen und speichern.`;
+    render();
+  },
 
   goBoard: (gameId) => {
     const g = games.find((x) => x.id === gameId);
@@ -328,8 +353,13 @@ function planView() {
     </section>`;
   }).join('');
   const free = freeUidsForDraft();
+  const roundDone = todays.length >= 2 && todays.every((g) => g.status === 'finished');
+  const advanceBtn = existingCards
+    ? `<div class="row" style="margin:${existingCards ? '-4px' : '0'} 0 12px"><h2 style="margin:0">Bereits erzeugte Tische (Spieltag ${latestDay()})</h2>
+        ${roundDone ? `<button class="outline-accent sm" data-act="advanceRound">Turnierbaum: nächste Runde vorbereiten</button>` : ''}</div>`
+    : '';
   return (planMsg ? `<p role="status" class="msg ${cls}" style="margin-bottom:16px">${esc(planMsg)}</p>` : '') +
-    (existingCards ? `<h2 style="margin:0 0 12px">Bereits erzeugte Tische (Spieltag ${latestDay()})</h2><div class="tables" style="margin-bottom:24px">${existingCards}</div>` : '') +
+    (existingCards ? `${advanceBtn}<div class="tables" style="margin-bottom:24px">${existingCards}</div>` : '') +
     `<h2 style="margin:0 0 12px">Neuer Entwurf · Spieltag ${draftDay}</h2>
     <div class="tables">${cards}<button class="addtable" data-act="addTable">+ Tisch hinzufügen</button></div>
     <div class="panel row" style="margin-top:20px;padding:16px 20px">
