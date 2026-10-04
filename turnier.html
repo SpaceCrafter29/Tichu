@@ -148,8 +148,13 @@ function myActiveGame() {
     .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0))[0] || null;
 }
 function finishedGames() { return games.filter((g) => g.status === 'finished'); }
+// Die Runde, in der gerade gespielt wird: die erste mit noch nicht beendeten Tischen (sonst die letzte).
+function currentDay() {
+  const open = schedules.find((s) => s.tables.some((t) => { const g = games.find((x) => x.id === t.gameId); return g && g.status !== 'finished'; }));
+  return open ? open.day : latestDay();
+}
 function todaysGames() {
-  const sched = schedules.find((s) => s.day === latestDay());
+  const sched = schedules.find((s) => s.day === currentDay());
   if (!sched) return [];
   const ids = new Set(sched.tables.map((t) => t.gameId));
   return games.filter((g) => ids.has(g.id));
@@ -393,27 +398,32 @@ function planView() {
       <button class="sm danger" data-act="removeTable" data-a="${i}">Tisch entfernen</button>
     </section>`;
   }).join('');
-  const todays = todaysGames();
-  const existingCards = todays.map((g) => {
+  const card = (g) => {
     const st = statusOf(g);
-    return `<section class="panel stack"><div class="row"><h2 style="font-size:18px">${esc(roundNameOf(g))}</h2><span class="chip ${st.cls}">${st.label}</span></div>
+    return `<section class="panel stack"><div class="row"><h2 style="font-size:18px">Tisch ${schedules.find((x) => x.tables.some((t) => t.gameId === g.id)).tables.findIndex((t) => t.gameId === g.id) + 1}</h2><span class="chip ${st.cls}">${st.label}</span></div>
       ${g.seatUids
         ? `<div class="grid2">${g.seatUids.map((uid, si) => `<div class="seat${g.seats[si] ? ' ready' : ''}"><b>${esc(usernameOf(uid))}</b><span class="small muted">${g.seats[si] ? 'da' : 'noch nicht da'}</span></div>`).join('')}</div>`
         : `<p class="muted" style="margin:0;font-size:14px">Gesperrt - wird freigegeben, sobald ${esc((g.sourceGameIds || []).map(tableLabel).join(' und '))} entschieden sind.</p>`}
     </section>`;
+  };
+  const roundSections = schedules.map((sc) => {
+    const gs = sc.tables.map((t) => games.find((g) => g.id === t.gameId)).filter(Boolean);
+    const canAdvance = sc.day === latestDay() && gs.length >= 2;
+    return `<div class="row" style="margin:0 0 12px"><h2 style="margin:0">Runde ${sc.day}</h2>
+        ${canAdvance ? `<button class="outline-accent sm" data-act="advanceRound">Turnierbaum: Finale / nächste Runde anlegen</button>` : ''}</div>
+      <div class="tables" style="margin-bottom:24px">${gs.map(card).join('')}</div>`;
   }).join('');
-  const free = freeUidsForDraft();
-  const advanceBtn = existingCards
-    ? `<div class="row" style="margin:-4px 0 12px"><h2 style="margin:0">Bereits erzeugte Tische (Runde ${latestDay()})</h2>
-        ${todays.length >= 2 ? `<button class="outline-accent sm" data-act="advanceRound">Turnierbaum: Finale / nächste Runde anlegen</button>` : ''}</div>`
-    : '';
+  const busy = new Set();
+  games.forEach((g) => { if (g.status !== 'finished' && g.seatUids) g.seatUids.forEach((u) => busy.add(u)); });
+  draftTables.forEach((t) => t.seats.forEach((u) => { if (u) busy.add(u); }));
+  const unassigned = players.map((p) => p.uid).filter((u) => !busy.has(u));
   return (planMsg ? `<p role="status" class="msg ${cls}" style="margin-bottom:16px">${esc(planMsg)}</p>` : '') +
-    (existingCards ? `${advanceBtn}<div class="tables" style="margin-bottom:24px">${existingCards}</div>` : '') +
+    roundSections +
     `<h2 style="margin:0 0 12px">Neuer Entwurf · Runde ${draftDay}</h2>
     <div class="tables">${cards}<button class="addtable" data-act="addTable">+ Tisch hinzufügen</button></div>
     <div class="panel row" style="margin-top:20px;padding:16px 20px">
       <div style="display:flex;flex-direction:column;gap:4px">
-        <span>${free.length ? 'Nicht eingeteilt: ' + esc(free.map(usernameOf).join(', ')) : players.length ? 'Alle ' + players.length + ' Accounts eingeteilt' : 'Noch keine Accounts angelegt'}</span>
+        <span>${unassigned.length ? 'Ohne Tisch: ' + esc(unassigned.map(usernameOf).join(', ')) : players.length ? 'Alle ' + players.length + ' Accounts haben einen Tisch' : 'Noch keine Accounts angelegt'}</span>
       </div>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
         <button data-act="nextDay">Neue Runde</button>
@@ -460,7 +470,7 @@ function standingsView() {
   return `<div class="cols">
     <section class="panel col-main" style="padding-top:12px">${standingsTable(false)}<p class="small muted" style="margin:12px 0 0">Live aus ${finishedGames().length} gewerteten Matches · 1 Sieg = 1 Punkt · Gleichstand = geteilter Platz</p></section>
     <div class="col-side stack" style="gap:16px">
-      <section class="panel stack" style="gap:12px"><h2>Aktuell · Runde ${latestDay() || '–'}</h2>${today || '<p class="small muted" style="margin:0">Spielplan noch nicht veröffentlicht.</p>'}</section>
+      <section class="panel stack" style="gap:12px"><h2>Aktuell · Runde ${currentDay() || '–'}</h2>${today || '<p class="small muted" style="margin:0">Spielplan noch nicht veröffentlicht.</p>'}</section>
       ${history ? `<section class="panel" style="padding-top:16px;padding-bottom:8px"><h2 style="margin-bottom:6px">Letzte Ergebnisse</h2>${history}</section>` : ''}
     </div></div>`;
 }
