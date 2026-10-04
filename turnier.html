@@ -100,7 +100,7 @@ let shownPassword = null; // { uid, password }
 let draftDay = 1;
 let draftTables = [];  // [{ seats:[uid,uid,uid,uid], target:1000 }] oder Turnierbaum-Tisch { derived:[gameId,gameId], seats:[], target } - Entwurf, bis "Speichern"
 let planMsg = '';
-let autoJoinedGameId = null;
+let joinBusy = false, joinErr = '';
 
 // ---------- Vorausgefüllte Links (siehe README: "ich sag's, du tippst nur einmal") ----------
 // Erlaubt es, einen fertigen Admin-Vorgang als Link zu verschicken, statt ihn von Hand eintippen
@@ -285,6 +285,16 @@ const A = {
     render();
   },
 
+  joinTable: async (gameId) => {
+    if (!me || joinBusy) return;
+    joinBusy = true; joinErr = ''; render();
+    try {
+      await joinAssignedSeat(gameId, me.uid);
+    } catch (e) {
+      joinErr = 'Beitritt fehlgeschlagen: ' + (e.message || e);
+    }
+    joinBusy = false; render();
+  },
   goBoard: (gameId) => {
     const g = games.find((x) => x.id === gameId);
     if (!g || !me) return;
@@ -445,18 +455,16 @@ function mineView() {
     body = `<section class="panel stack" style="gap:8px"><h2 style="font-size:20px">Heute kein Tisch</h2><p class="muted" style="margin:0">Der Admin hat dich noch nicht eingeteilt oder den Spielplan noch nicht gespeichert.</p></section>`;
   } else {
     const seatIndex = g.seatUids.indexOf(me.uid);
-    if (g.seats[seatIndex] == null && autoJoinedGameId !== g.id) {
-      autoJoinedGameId = g.id;
-      joinAssignedSeat(g.id, me.uid).then(render).catch((e) => { planMsg = String(e); render(); });
-    }
-    const st = statusOf(g);
     if (g.status === 'waiting') {
+      const joined = g.seats[seatIndex] != null;
       const rel = [['Du', seatIndex], ['Partner', (seatIndex + 2) % 4], ['Gegner 1', (seatIndex + 1) % 4], ['Gegner 2', (seatIndex + 3) % 4]];
       body = `<section class="panel stack" style="border-color:var(--accent)">
         <div class="row"><h2 style="font-size:20px">Dein Tisch heute</h2><span class="small muted">Ziel ${g.winCondition ? g.winCondition.target : 1000}</span></div>
-        <p class="muted" style="margin:0">Warte auf Mitspieler … ${g.seats.filter(Boolean).length} von 4 da</p>
+        <p class="muted" style="margin:0">${joined ? 'Du bist am Tisch. Warte auf Mitspieler … ' : 'Noch nicht betreten. '}${g.seats.filter(Boolean).length} von 4 da</p>
         <div class="grid4">${rel.map(([label, si]) => `<div class="seat${g.seats[si] ? ' ready' : ''}${label === 'Du' ? ' me' : ''}"><b>${label}</b><span class="small muted">${g.seats[si] ? 'bereit' : 'noch nicht da'}</span></div>`).join('')}</div>
-        <span class="small muted">Automatisch zugewiesen. In der Partie siehst du keine Namen – nur Du, Partner und Gegner.</span></section>`;
+        ${joined ? '' : `<button class="primary" data-act="joinTable" data-a="${esc(g.id)}" ${joinBusy ? 'disabled' : ''}>Tisch betreten</button>`}
+        ${joinErr ? `<p role="alert" style="margin:0;color:var(--err);font-size:14px">${esc(joinErr)}</p>` : ''}
+        <span class="small muted">Dein Platz ist fest zugewiesen. In der Partie siehst du keine Namen – nur Du, Partner und Gegner.</span></section>`;
     } else if (g.status === 'finished') {
       const aWon = g.result.winnerTeam === 'A';
       const mineA = seatIndex % 2 === 0;
