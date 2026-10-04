@@ -47,6 +47,8 @@ h2{margin:0;font-size:17px}
 .stand.head{font-size:13px;color:var(--muted);padding-top:4px}
 .stand.me{background:rgba(255,138,52,.12)}
 .stand .r{text-align:right}
+.stand .nm{min-width:0;overflow-wrap:anywhere;font-weight:600}
+.stand .pill{display:inline-block;white-space:nowrap}
 .seat{padding:14px 10px;border-radius:8px;background:#141414;border:1px dashed #4a4a4a;text-align:center;display:flex;flex-direction:column;gap:3px;color:var(--muted)}
 .seat.ready{border:1px solid var(--accent);color:var(--text)}
 .seat.me{background:rgba(255,138,52,.18)}
@@ -61,14 +63,14 @@ h2{margin:0;font-size:17px}
 .d-title{margin:28px 0 20px}
 .back-link{color:var(--muted);text-decoration:none;font-size:14px}
 .back-link:hover{color:var(--accent)}
-@media (max-width:640px){.tables{grid-template-columns:1fr}.stand{grid-template-columns:44px minmax(0,1fr) 0 60px 46px}.stand .hide-h{display:none}}
+@media (max-width:640px){.tables{grid-template-columns:1fr}.stand{grid-template-columns:40px minmax(0,1fr) 64px 48px;gap:6px;padding:11px 4px}.stand .hide-h{display:none}}
 </style>
 </head>
 <body>
 <div id="app" class="d-wrap"><p class="muted" style="padding-top:60px">Lädt…</p></div>
 <script type="module">
 import { ensureSignedIn } from './lib/auth.js';
-import { isAdminUid } from './lib/lobby.js';
+import { isAdminUid, leaveTable } from './lib/lobby.js';
 import {
   tournamentLogin, tournamentLogout, currentTournamentUser, getPlayerProfile,
   adminCreatePlayer, adminDeletePlayer, adminGetPassword, ensureUserProfile,
@@ -295,6 +297,17 @@ const A = {
     }
     joinBusy = false; render();
   },
+  leaveSeat: async (gameId) => {
+    const g = games.find((x) => x.id === gameId);
+    if (!me || !g || joinBusy) return;
+    joinBusy = true; joinErr = ''; render();
+    try {
+      await leaveTable(gameId, g.seatUids.indexOf(me.uid));
+    } catch (e) {
+      joinErr = 'Verlassen fehlgeschlagen: ' + (e.message || e);
+    }
+    joinBusy = false; render();
+  },
   goBoard: (gameId) => {
     const g = games.find((x) => x.id === gameId);
     if (!g || !me) return;
@@ -412,10 +425,10 @@ function standingsTable(compact) {
     return st.map((r) => `<div style="display:grid;grid-template-columns:36px minmax(0,1fr) 32px;gap:6px;padding:8px 6px;border-radius:6px;${me && r.uid === me.uid ? 'background:rgba(255,138,52,.12)' : ''}">
       <b style="color:${r.place === 1 ? 'var(--accent)' : 'var(--text)'}">${r.place}.</b><b>${esc(r.name)}</b><b class="num" style="text-align:right">${r.wins}</b></div>`).join('');
   }
-  return `<div class="stand head"><span>Platz</span><span>Spieler</span><span class="r hide-h">Niederl.</span><span class="r">Matches</span><span class="r">Siege</span></div>` +
+  return `<div class="stand head"><span>Platz</span><span>Spieler</span><span class="r hide-h">Niederl.</span><span class="r">Spiele</span><span class="r">Siege</span></div>` +
     st.map((r) => `<div class="stand${me && r.uid === me.uid ? ' me' : ''}">
       <b class="num" style="color:${r.place === 1 ? 'var(--accent)' : 'var(--text)'}">${r.place}.</b>
-      <span style="font-weight:600;min-width:0">${esc(r.name)}${r.shared ? '<span class="pill">geteilt</span>' : ''}</span>
+      <span class="nm">${esc(r.name)}${r.shared ? '<span class="pill">geteilt</span>' : ''}</span>
       <span class="r muted num hide-h">${r.losses}</span><span class="r muted num">${r.matches}</span><b class="r num" style="font-size:18px">${r.wins}</b></div>`).join('');
 }
 
@@ -462,7 +475,9 @@ function mineView() {
         <div class="row"><h2 style="font-size:20px">Dein Tisch heute</h2><span class="small muted">Ziel ${g.winCondition ? g.winCondition.target : 1000}</span></div>
         <p class="muted" style="margin:0">${joined ? 'Du bist am Tisch. Warte auf Mitspieler … ' : 'Noch nicht betreten. '}${g.seats.filter(Boolean).length} von 4 da</p>
         <div class="grid4">${rel.map(([label, si]) => `<div class="seat${g.seats[si] ? ' ready' : ''}${label === 'Du' ? ' me' : ''}"><b>${label}</b><span class="small muted">${g.seats[si] ? 'bereit' : 'noch nicht da'}</span></div>`).join('')}</div>
-        ${joined ? '' : `<button class="primary" data-act="joinTable" data-a="${esc(g.id)}" ${joinBusy ? 'disabled' : ''}>Tisch betreten</button>`}
+        ${joined
+          ? `<button class="danger" data-act="leaveSeat" data-a="${esc(g.id)}" ${joinBusy ? 'disabled' : ''}>Tisch verlassen</button>`
+          : `<button class="primary" data-act="joinTable" data-a="${esc(g.id)}" ${joinBusy ? 'disabled' : ''}>Tisch betreten</button>`}
         ${joinErr ? `<p role="alert" style="margin:0;color:var(--err);font-size:14px">${esc(joinErr)}</p>` : ''}
         <span class="small muted">Dein Platz ist fest zugewiesen. In der Partie siehst du keine Namen – nur Du, Partner und Gegner.</span></section>`;
     } else if (g.status === 'finished') {
