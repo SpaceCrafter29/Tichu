@@ -296,7 +296,6 @@ let selected = new Set();
 let schupfenDraft = {}; // {toSeat: cardId}
 let schupfenPendingCardId = null; // gerade angetippte, noch nicht zugeordnete Karte
 let errorMsg = '';
-let autoPlaying = false;
 let playAgainClicked = false;
 let tournamentResultAttempted = false; // verhindert wiederholte finishTournamentMatch()-Versuche
 // bei jedem Re-Render, sobald einmal (erfolgreich oder nicht) versucht wurde - ein doppelter
@@ -438,22 +437,6 @@ setInterval(() => {
   if (round) render();
 }, 1000);
 
-// Wenn man selbst am Zug ist, ein Wunsch offen ist und man eine einzelne passende Karte hat,
-// die den Tischstand schlägt, wird die automatisch gespielt statt sie manuell suchen zu
-// müssen (mehrkartige Erfüllungen - Paar etc. - bleiben weiterhin manuell).
-function autoPlayWish() {
-  if (autoPlaying || !round || round.over || round.pendingDragonGiveaway) return;
-  if (round.turn !== mySeat || round.pendingWish == null) return;
-  const card = round.hands[mySeat].find((c) => c.rank === round.pendingWish && !c.special);
-  if (!card) return;
-  const combo = classify([card]);
-  if (!combo || !canBeat(combo, round.currentTrick.combo)) return;
-  autoPlaying = true;
-  postEvent(gameId, mySeat, 'play', { cardIds: [card.id] })
-    .catch((e) => { errorMsg = e.message || String(e); render(); })
-    .finally(() => { autoPlaying = false; });
-}
-
 function withError(fn) {
   return async (...args) => {
     try {
@@ -483,7 +466,6 @@ async function start() {
     playAgainClicked = false;
     syncTurnTimer();
     render();
-    autoPlayWish();
   });
 }
 
