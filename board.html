@@ -78,7 +78,7 @@
 <script type="module">
 import { ensureSignedIn, getProfile } from './lib/auth.js';
 import {
-  getAllHands, dealFreshRound, postEvent, watchEvents, watchGame, leaveTable, SEAT_LABELS,
+  getAllHands, dealFreshRound, postEvent, watchEvents, watchGame, SEAT_LABELS,
   getWinCondition, describeWinCondition,
 } from './lib/lobby.js';
 import { finishTournamentMatch } from './lib/tournament.js';
@@ -117,7 +117,7 @@ watchGame(gameId, (game) => {
     document.getElementById('title').textContent = game.name ? `Tisch ${game.name}` : 'Tichu';
     document.getElementById('subtitle').textContent = describeWinCondition(game);
     // Springt der Tisch, NACHDEM er schon lief, wieder auf 'waiting' zurück, hat jemand ihn
-    // zurückgesetzt (manuell verlassen oder wegen Inaktivität gekickt, siehe handleTimeout) -
+    // zurückgesetzt (manuell verlassen oder wegen Inaktivität gekickt, früher durch den Zugtimer) -
     // alle Clients (auch der gekickte selbst, falls dessen Tab noch offen ist) müssen dann
     // zurück ins Menü, der eigene Sitz ist nicht mehr gültig.
     if (started && !redirectingHome && lastKnownStatus && lastKnownStatus !== 'waiting' && game.status === 'waiting') {
@@ -303,21 +303,17 @@ let tournamentResultAttempted = false; // verhindert wiederholte finishTournamen
 // lib/tournament.js, soll aber nicht bei jedem Sekunden-Tick erneut angestoßen werden.
 let currentSchupfenSubs = {};
 
-// --- Zugtimer: 1 Minute pro Aktion, sonst automatischer Zug/Kick wegen Inaktivität ----------
-// Jeder Client verfolgt lokal, wer gerade "dran" ist (Grand-Tichu-Entscheidung, Schupfen,
-// Drachenstich-Vergabe oder ein normaler Spielzug) und wie lange schon. Läuft die Zeit ab,
-// postet DIESER Client (nicht der Betroffene selbst - siehe seat !== mySeat unten) einen
-// automatischen Zug an dessen Stelle. Mehrere Clients können dabei gleichzeitig auslösen -
-// harmlos, verspätete/ungültige Zweitversuche werden beim Nachspielen einfach übersprungen
-// (siehe replay()/applyEvent() oben). Nach drei automatischen Spielzügen IN FOLGE innerhalb
-// derselben Runde gilt der Platz als aufgegeben: der ganze Tisch wird zurückgesetzt (dieselbe
-// Mechanik wie beim manuellen Verlassen eines laufenden Spiels, siehe leaveTable()).
+// --- Zugtimer: nur Anzeige, KEIN automatischer Zug und kein Kick ----------------------------
+// Jeder Client verfolgt lokal, wer gerade "dran" ist (Grand-Tichu-Entscheidung, Drachenstich-
+// Vergabe oder ein normaler Spielzug: 1 Minute) bzw. wie lange das Schupfen schon läuft (alle
+// vier gleichzeitig: 3 Minuten) und zeigt die Restzeit an. Läuft sie ab, passiert nichts - es
+// wird nie automatisch für jemanden gespielt, der Tisch wartet einfach weiter.
 const TURN_TIMEOUT_MS = 60 * 1000;
-const STRIKE_LIMIT = 3;
-let turnTimerActor = null;
+const SCHUPFEN_TIMEOUT_MS = 3 * 60 * 1000;
+let turnTimerActor = null;      // Sitzindex, oder 'schupfen' solange alle gemeinsam schupfen
 let turnTimerStartedAt = null;
 let turnRemainingSec = null;
-let kicking = false;
+let turnTimerLimitMs = TURN_TIMEOUT_MS;
 
 // Wer muss gerade handeln? null, solange niemand konkret am Zug ist (z. B. Rundenende-Screen).
 function actingSeat() {
@@ -335,75 +331,6 @@ function actingSeat() {
   return round.turn;
 }
 
-// Ein möglichst harmloser automatischer Zug für `seat`: Große-Tichu ablehnen, die drei
-// niedrigsten Karten fürs Schupfen abgeben, den Drachenstich an den ersten Gegner vergeben,
-// bei offenem (erfüllbarem) Wunsch die passende Karte spielen, sonst anspielen (niedrigste
-// normale Karte) oder passen.
-function autoActionFor(seat) {
-  if (!round.dealt14) return { type: 'grandTichu', payload: { called: false } };
-  if (!round.schupfenDone) {
-    const hand = sortHand(round.hands[seat]);
-    const others = [0, 1, 2, 3].filter((s) => s !== seat);
-    const gives = {};
-    others.forEach((s, i) => { gives[s] = hand[i].id; });
-    return { type: 'schupfenSubmit', payload: { gives } };
-  }
-  if (round.pendingDragonGiveaway) {
-    const opponent = [0, 1, 2, 3].find((s) => teamOf(s) !== teamOf(seat));
-    return { type: 'giveDragonTrick', payload: { toPlayerIdx: opponent } };
-  }
-  if (round.wishPendingFulfillable(seat)) {
-    const card = round.hands[seat].find((c) => c.rank === round.pendingWish && !c.special);
-    return { type: 'play', payload: { cardIds: [card.id] } };
-  }
-  if (round.currentTrick.combo === null) {
-    const hand = sortHand(round.hands[seat]);
-    const card = hand.find((c) => !c.special) || hand[0];
-    return { type: 'play', payload: { cardIds: [card.id] } };
-  }
-  return { type: 'pass', payload: {} };
-}
-
-// Index des ersten Ereignisses der aktuell laufenden Runde (nach dem letzten `newRound`).
-function roundStartIndex() {
-  for (let i = events.length - 1; i >= 0; i--) if (events[i].type === 'newRound') return i + 1;
-  return 0;
-}
-// Wie viele eigene Spielzüge (Spielen/Passen) hat `seat` in dieser Runde zuletzt IN FOLGE
-// automatisch (wegen Timeout) gemacht?
-function autoStrikeCount(seat) {
-  const mine = events.slice(roundStartIndex()).filter((e) => e.seatIndex === seat && (e.type === 'play' || e.type === 'pass'));
-  let n = 0;
-  for (let i = mine.length - 1; i >= 0; i--) {
-    if (mine[i].payload && mine[i].payload.auto) n++;
-    else break;
-  }
-  return n;
-}
-
-async function handleTimeout(seat) {
-  if (!round) return;
-  const action = autoActionFor(seat);
-  if (!action) return;
-  try {
-    await postEvent(gameId, seat, action.type, { ...action.payload, auto: true });
-  } catch (e) {
-    console.warn('Automatischer Zug fehlgeschlagen:', e);
-    return;
-  }
-  if ((action.type === 'play' || action.type === 'pass') && !kicking && autoStrikeCount(seat) >= STRIKE_LIMIT) {
-    kicking = true;
-    try {
-      await postEvent(gameId, seat, 'kicked', { reason: 'inactivity' });
-      await leaveTable(gameId, seat);
-    } catch (e) {
-      console.warn('Kick wegen Inaktivität fehlgeschlagen:', e);
-    } finally {
-      kicking = false;
-    }
-  }
-}
-
 // Merkt sich, seit wann der aktuelle Akteur dran ist (setzt den Timer zurück, sobald sich der
 // Akteur ändert) - läuft für ALLE sichtbar mit, auch für die/den Betroffene(n) selbst, damit
 // man die eigene Restzeit sieht. Der automatische Zug bei Ablauf (siehe unten im Interval)
@@ -411,29 +338,25 @@ async function handleTimeout(seat) {
 // befindliche Entscheidung nicht selbst überschreiben; die drei anderen Clients setzen den
 // Timeout notfalls für einen um.
 function syncTurnTimer() {
-  const seat = actingSeat();
-  if (seat === null) {
+  const schupfen = round && round.dealt14 && !round.over && !round.schupfenDone;
+  const key = schupfen ? 'schupfen' : actingSeat();
+  if (key === null) {
     turnTimerActor = null;
     turnTimerStartedAt = null;
     turnRemainingSec = null;
     return;
   }
-  if (turnTimerActor !== seat) {
-    turnTimerActor = seat;
+  if (turnTimerActor !== key) {
+    turnTimerActor = key;
     turnTimerStartedAt = Date.now();
+    turnTimerLimitMs = schupfen ? SCHUPFEN_TIMEOUT_MS : TURN_TIMEOUT_MS;
   }
 }
 
 setInterval(() => {
   if (turnTimerActor === null || turnTimerStartedAt === null) return;
   const elapsed = Date.now() - turnTimerStartedAt;
-  turnRemainingSec = Math.max(0, Math.ceil((TURN_TIMEOUT_MS - elapsed) / 1000));
-  if (elapsed >= TURN_TIMEOUT_MS) {
-    const seat = turnTimerActor;
-    turnTimerActor = null;
-    turnTimerStartedAt = null;
-    if (seat !== mySeat) handleTimeout(seat);
-  }
+  turnRemainingSec = Math.max(0, Math.ceil((turnTimerLimitMs - elapsed) / 1000));
   if (round) render();
 }, 1000);
 
@@ -481,10 +404,13 @@ function renderTurnTimer() {
   p.style.background = '#1c2e3a';
   p.style.borderColor = '#2563eb';
   p.style.color = '#93c5fd';
-  const strikes = autoStrikeCount(turnTimerActor);
-  const who = turnTimerActor === mySeat ? 'Du bist' : `${seatLabel(turnTimerActor)} ist`;
-  p.textContent = `${who} am Zug - noch ${turnRemainingSec}s, sonst automatischer Zug`
-    + (strikes > 0 ? ` (${strikes}/${STRIKE_LIMIT}, danach Kick wegen Inaktivität)` : '.');
+  const mmss = `${Math.floor(turnRemainingSec / 60)}:${String(turnRemainingSec % 60).padStart(2, '0')}`;
+  if (turnTimerActor === 'schupfen') {
+    p.textContent = turnRemainingSec > 0 ? `Schupfen - noch ${mmss}.` : 'Schupfen - die Zeit ist abgelaufen.';
+  } else {
+    const who = turnTimerActor === mySeat ? 'Du bist' : `${seatLabel(turnTimerActor)} ist`;
+    p.textContent = turnRemainingSec > 0 ? `${who} am Zug - noch ${mmss}.` : `${who} am Zug - die Zeit ist abgelaufen.`;
+  }
   return p;
 }
 
