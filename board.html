@@ -515,6 +515,12 @@ function renderSchupfen() {
   status.textContent = `Schupfen: ${doneCount}/4 Spieler bereit.`;
   wrap.appendChild(status);
 
+  const partnerSeat = (mySeat + 2) % 4;
+  const partnerInfo = document.createElement('p');
+  partnerInfo.style.margin = '0 0 8px';
+  partnerInfo.innerHTML = `Dein Partner: <b>${seatLabel(partnerSeat)}</b>`;
+  wrap.appendChild(partnerInfo);
+
   const alreadySubmitted = !!currentSchupfenSubs[mySeat];
 
   if (alreadySubmitted) {
@@ -536,7 +542,7 @@ function renderSchupfen() {
   others.forEach((targetSeat) => {
     const slot = document.createElement('div');
     slot.className = 'target-slot';
-    slot.innerHTML = `<div class="t-label">an ${seatLabel(targetSeat)}</div>`;
+    slot.innerHTML = `<div class="t-label">an ${seatLabel(targetSeat)}${targetSeat === (mySeat + 2) % 4 && seatLabel(targetSeat) !== 'Partner' ? ' (Partner)' : ''}</div>`;
     const cardHolder = document.createElement('div');
     cardHolder.className = 't-card';
     const assignedId = schupfenDraft[targetSeat];
