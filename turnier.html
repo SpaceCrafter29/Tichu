@@ -77,7 +77,7 @@ import {
 } from './lib/tournamentAuth.js';
 import {
   genPassword, watchPlayers, watchSchedules, watchTournamentGames, saveSchedule,
-  joinAssignedSeat, computeStandings,
+  joinAssignedSeat, computeStandings, adminChangeSeats,
 } from './lib/tournament.js';
 
 function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
@@ -103,6 +103,8 @@ let draftDay = 1;
 let draftTables = [];  // [{ seats:[uid,uid,uid,uid], target:1000 }] oder Turnierbaum-Tisch { derived:[gameId,gameId], seats:[], target } - Entwurf, bis "Speichern"
 let planMsg = '';
 let joinBusy = false, joinErr = '';
+let editSeats = null;  // Admin: { gameId, seats:[uid x4] } - Sitze eines gespeicherten, noch leeren Tisches ändern
+let pendingEdit = null; // aus Link: { gameId, names:[4] }, wird aufgelöst sobald players geladen sind
 
 // ---------- Vorausgefüllte Links (siehe README: "ich sag's, du tippst nur einmal") ----------
 // Erlaubt es, einen fertigen Admin-Vorgang als Link zu verschicken, statt ihn von Hand eintippen
@@ -117,6 +119,7 @@ let pendingDraftUsernames = null; // [{ names:[4], target }] - bis players gelad
   if (prefill.has('newU')) newU = prefill.get('newU');
   if (prefill.has('newP')) newP = prefill.get('newP');
   if (prefill.has('day')) draftDay = Number(prefill.get('day')) || draftDay;
+  if (prefill.has('edit') && prefill.has('seats')) pendingEdit = { gameId: prefill.get('edit'), names: prefill.get('seats').split(',') };
   if (prefill.has('draft')) {
     const target = Number(prefill.get('target')) || 1000;
     pendingDraftUsernames = prefill.get('draft').split('|').filter(Boolean).map((t) => ({ names: t.split(','), target }));
@@ -317,6 +320,22 @@ const A = {
     }
     joinBusy = false; render();
   },
+  editTable: (gameId) => {
+    const g = games.find((x) => x.id === gameId);
+    if (g && g.seatUids) editSeats = { gameId, seats: g.seatUids.slice() };
+    planMsg = ''; render();
+  },
+  cancelEdit: () => { editSeats = null; render(); },
+  saveEdit: async () => {
+    if (!editSeats) return;
+    try {
+      await adminChangeSeats(editSeats.gameId, editSeats.seats);
+      planMsg = 'Gespeichert – Sitze geändert.'; editSeats = null;
+    } catch (e) {
+      planMsg = 'Fehler: ' + (e.message || e);
+    }
+    render();
+  },
   goBoard: (gameId) => {
     const g = games.find((x) => x.id === gameId);
     if (!g || !me) return;
@@ -400,10 +419,20 @@ function planView() {
   }).join('');
   const card = (g) => {
     const st = statusOf(g);
+    const editing = editSeats && editSeats.gameId === g.id;
+    const editable = g.seatUids && g.status === 'waiting' && g.seats.every((x) => x == null);
+    if (editing) {
+      const opts = players.map((p) => p.uid);
+      return `<section class="panel stack" style="border-color:var(--accent)"><div class="row"><h2 style="font-size:18px">Tisch ${schedules.find((x) => x.tables.some((t) => t.gameId === g.id)).tables.findIndex((t) => t.gameId === g.id) + 1}</h2><span class="chip">Sitze ändern</span></div>
+        <div class="grid2">${editSeats.seats.map((uid, si) => `<div class="field"><label>Sitz ${si + 1} · Team ${si % 2 === 0 ? 'A' : 'B'}</label>
+          <select data-editseat="${si}">${opts.map((u) => `<option value="${esc(u)}" ${u === uid ? 'selected' : ''}>${esc(usernameOf(u))}</option>`).join('')}</select></div>`).join('')}</div>
+        <div style="display:flex;gap:10px"><button class="primary" data-act="saveEdit">Speichern</button><button data-act="cancelEdit">Abbrechen</button></div></section>`;
+    }
     return `<section class="panel stack"><div class="row"><h2 style="font-size:18px">Tisch ${schedules.find((x) => x.tables.some((t) => t.gameId === g.id)).tables.findIndex((t) => t.gameId === g.id) + 1}</h2><span class="chip ${st.cls}">${st.label}</span></div>
       ${g.seatUids
         ? `<div class="grid2">${g.seatUids.map((uid, si) => `<div class="seat${g.seats[si] ? ' ready' : ''}"><b>${esc(usernameOf(uid))}</b><span class="small muted">${g.seats[si] ? 'da' : 'noch nicht da'}</span></div>`).join('')}</div>`
         : `<p class="muted" style="margin:0;font-size:14px">Gesperrt - wird freigegeben, sobald ${esc((g.sourceGameIds || []).map(tableLabel).join(' und '))} entschieden sind.</p>`}
+      ${editable ? `<button class="sm" data-act="editTable" data-a="${esc(g.id)}">Sitze ändern</button>` : ''}
     </section>`;
   };
   const roundSections = schedules.map((sc) => {
@@ -558,7 +587,9 @@ document.addEventListener('input', (e) => {
 });
 document.addEventListener('change', (e) => {
   const d = e.target.dataset || {};
-  if (d.seat) {
+  if (d.editseat !== undefined && editSeats) {
+    editSeats.seats[+d.editseat] = e.target.value; render();
+  } else if (d.seat) {
     const [ti, si] = d.seat.split(',').map(Number);
     draftTables[ti].seats[si] = e.target.value;
     planMsg = 'Geändert – noch nicht gespeichert.'; render();
@@ -580,6 +611,13 @@ document.addEventListener('change', (e) => {
       }));
       pendingDraftUsernames = null;
       planMsg = 'Entwurf aus Link übernommen - bitte prüfen (leere Sitze = Name nicht gefunden) und speichern.';
+    }
+    if (pendingEdit) {
+      const byName = Object.fromEntries(p.map((pl) => [pl.username.toLowerCase(), pl.uid]));
+      const seats = pendingEdit.names.map((n) => byName[n.trim().toLowerCase()] || '');
+      if (seats.every(Boolean)) { editSeats = { gameId: pendingEdit.gameId, seats }; planMsg = 'Sitze aus Link übernommen - bitte prüfen und speichern.'; }
+      else planMsg = 'Fehler: Ein Name aus dem Link wurde nicht gefunden.';
+      pendingEdit = null;
     }
     render();
   });
