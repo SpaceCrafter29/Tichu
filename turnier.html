@@ -516,7 +516,7 @@ function standingsView() {
     const winners = aWon ? [names[0], names[2]] : [names[1], names[3]];
     const losers = aWon ? [names[1], names[3]] : [names[0], names[2]];
     return `<div class="list-row small" style="font-size:14px"><span><b>${esc(winners.join(' + '))}</b> <span class="muted">vs. ${esc(losers.join(' + '))}</span></span>
-      <span class="muted" style="white-space:nowrap">${Math.max(g.result.scoreA, g.result.scoreB)}:${Math.min(g.result.scoreA, g.result.scoreB)}</span></div>`;
+      <span class="muted" style="white-space:nowrap">${Math.max(g.result.scoreA, g.result.scoreB)}:${Math.min(g.result.scoreA, g.result.scoreB)} · <a href="spectate.html?g=${esc(g.id)}" style="color:var(--accent)">Ansehen</a></span></div>`;
   }).join('');
   return `<div class="cols">
     <section class="panel col-main" style="padding-top:12px">${standingsTable(false)}<p class="small muted" style="margin:12px 0 0">Live aus ${finishedGames().length} gewerteten Matches · 1 Sieg = 1 Punkt · Gleichstand = geteilter Platz</p></section>
@@ -552,7 +552,8 @@ function mineView() {
       body = `<section class="panel stack" style="gap:16px"><div class="stack" style="gap:4px"><span class="small muted">Match beendet</span><h2 style="font-size:26px">${won ? 'Ihr habt gewonnen' : 'Verloren'}</h2></div>
         <div class="grid2"><div class="panel${won ? '' : ''}" style="border-color:${won ? 'var(--accent)' : 'var(--border)'}"><b>Du + Partner</b><br><span class="num" style="font-size:28px">${mineA ? g.result.scoreA : g.result.scoreB}</span></div>
         <div class="panel" style="border-color:${!won ? 'var(--accent)' : 'var(--border)'}"><b>Gegner 1 + 2</b><br><span class="num" style="font-size:28px">${mineA ? g.result.scoreB : g.result.scoreA}</span></div></div>
-        <p class="small muted" style="margin:0">Ergebnis gespeichert - steht schon in der Tabelle.</p></section>`;
+        <p class="small muted" style="margin:0">Ergebnis gespeichert - steht schon in der Tabelle.</p>
+        <a href="spectate.html?g=${esc(g.id)}" style="color:var(--accent)">Spiel ansehen (Link zum Teilen)</a></section>`;
     } else {
       body = `<section class="panel stack" style="gap:16px"><h2 style="font-size:20px">Karten sind ausgeteilt</h2>
         <p class="muted" style="margin:0">Alle vier da - das Match läuft im Spielbrett.</p>

@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tichu zuschauen</title>
+<style>
+:root{--bg:#1a1a1a;--panel:#242424;--text:#ededed;--muted:#9a9a9a;--accent:#ff8a34;--border:#3a3a3a;--line:#333;--ok:#86efac}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:720px;margin:0 auto;padding:20px 16px 64px}
+h1{margin:0 0 4px;font-size:26px}
+.muted{color:var(--muted)}
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px;margin:14px 0}
+.chip{font-size:13px;padding:3px 10px;border-radius:999px;background:#141414;color:var(--muted)}
+.chip.live{background:rgba(255,138,52,.16);color:#ffb27a}.chip.done{background:rgba(134,239,172,.12);color:var(--ok)}
+.row{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}
+.ev{padding:7px 0;border-bottom:1px solid var(--line);font-size:15px}.ev:last-child{border-bottom:none}
+.ev b{color:var(--accent)}
+.card{display:inline-block;padding:1px 7px;margin:0 2px;border-radius:6px;background:#141414;border:1px solid var(--border);font-size:14px;white-space:nowrap}
+.card.Jade{color:#6fcf97}.card.Schwert{color:#cfd8e3}.card.Pagode{color:#7aa7ff}.card.Stern{color:#ff8a80}.card.sp{color:#fdba74}
+h2{font-size:16px;margin:0 0 8px}
+a{color:var(--accent)}
+</style>
+</head>
+<body>
+<main>
+  <a href="menu.html" class="muted" style="text-decoration:none;font-size:14px">← Menü</a>
+  <h1>Zuschauen</h1>
+  <div id="app"><p class="muted">Lädt…</p></div>
+</main>
+<script type="module">
+import { ensureSignedIn } from './lib/auth.js';
+import { db } from './lib/firebase-config.js';
+import { doc, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
+import { watchEvents, SEAT_LABELS, isAdminUid } from './lib/lobby.js';
+import { watchPlayers, watchTournamentGames } from './lib/tournament.js';
+import { createDeck } from './engine/cards.js';
+
+const app = document.getElementById('app');
+const gameId = new URLSearchParams(location.search).get('g');
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+// Kartennummern sind in jedem Spiel dieselben (siehe createDeck()), also lässt sich aus den
+// Ereignissen ablesen, welche Karte gespielt wurde - ohne jemandes Hand zu kennen.
+const deckById = Object.fromEntries(createDeck().map((c) => [c.id, c]));
+const cardLabel = (c) => c.special
+  ? { MAHJONG: 'Mahjong', PHOENIX: 'Phönix', DOG: 'Hund', DRAGON: 'Drache' }[c.special]
+  : `${({ 11: 'B', 12: 'D', 13: 'K', 14: 'A' }[c.rank] || c.rank)} ${c.suit}`;
+const cardHtml = (id) => {
+  const c = deckById[id];
+  return c ? `<span class="card ${c.special ? 'sp' : c.suit}">${esc(cardLabel(c))}</span>` : `<span class="card">#${esc(id)}</span>`;
+};
+
+let tSubscribed = false;
+let user = null, admin = false, game = null, events = [], players = [], tgames = [];
+
+function seatName(i) {
+  if (game && game.mode === 'tournament') {
+    const tg = tgames.find((g) => g.id === gameId);
+    const uid = tg && tg.seatUids && tg.seatUids[i];
+    const p = players.find((x) => x.uid === uid);
+    return p ? p.username : `Sitz ${i + 1}`;
+  }
+  return SEAT_LABELS[i];
+}
+
+function describe(ev) {
+  const who = `<b>${esc(seatName(ev.seatIndex))}</b>`;
+  const p = ev.payload || {};
+  switch (ev.type) {
+    case 'grandTichu': return `${who}: ${p.called ? 'Großes Tichu angesagt' : 'kein Großes Tichu'}`;
+    case 'tichu': return `${who} sagt <b>Tichu</b> an`;
+    case 'schupfenSubmit': return `${who} hat geschupft`;
+    case 'play': return `${who} spielt ${(p.cardIds || []).map(cardHtml).join('')}${p.wish != null ? ` · Wunsch: ${esc(p.wish)}` : ''}`;
+    case 'pass': return `${who} passt`;
+    case 'giveDragonTrick': return `${who} gibt den Drachenstich an <b>${esc(seatName(p.toPlayerIdx))}</b>`;
+    case 'kicked': return `${who} wurde wegen Inaktivität vom Tisch entfernt`;
+    default: return null;
+  }
+}
+
+function render() {
+  if (!game) return;
+  const finished = game.status === 'finished';
+  if (game.mode === 'tournament' && !finished && !admin) {
+    app.innerHTML = `<div class="panel"><h2>Noch nicht freigegeben</h2><p class="muted" style="margin:0">Turnier-Spiele kann man erst nach dem Ende anschauen, damit niemand live mitliest und Infos weitergibt.</p></div>`;
+    return;
+  }
+  const rounds = [[]];
+  for (const ev of events) {
+    if (ev.type === 'newRound') { rounds.push([]); continue; }
+    const text = describe(ev);
+    if (text) rounds[rounds.length - 1].push(text);
+  }
+  const r = game.result;
+  const statusChip = finished ? '<span class="chip done">beendet</span>' : `<span class="chip live">${game.status === 'waiting' ? 'wartet' : 'läuft'}</span>`;
+  const seats = [0, 1, 2, 3].map(seatName);
+  app.innerHTML = `<div class="panel"><div class="row"><h2 style="margin:0">${esc(game.name ? 'Tisch ' + game.name : 'Tisch')}</h2>${statusChip}</div>
+    <p class="muted" style="margin:8px 0 0">Team A: ${esc(seats[0] + ' + ' + seats[2])} · Team B: ${esc(seats[1] + ' + ' + seats[3])}</p>
+    ${r ? `<p style="margin:8px 0 0"><b>${esc(r.scoreA)} : ${esc(r.scoreB)}</b> <span class="muted">(Team ${esc(r.winnerTeam)} gewinnt)</span></p>` : ''}
+    <p class="muted" style="margin:8px 0 0;font-size:13px">Du siehst nur öffentliche Züge, keine Hände. ${finished ? '' : 'Aktualisiert sich live.'}</p></div>`
+    + rounds.map((evs, i) => evs.length ? `<div class="panel"><h2>${rounds.length === 1 ? 'Züge' : `Runde ${i + 1}`}</h2>${evs.map((t) => `<div class="ev">${t}</div>`).join('')}</div>` : '').join('')
+    + (events.length ? '' : '<p class="muted">Noch keine Züge.</p>');
+}
+
+(async () => {
+  if (!gameId) { app.innerHTML = '<p class="muted">Kein Spiel angegeben.</p>'; return; }
+  user = await ensureSignedIn().catch(() => null);
+  if (!user) { app.innerHTML = '<p class="muted">Anmeldung fehlgeschlagen.</p>'; return; }
+  admin = isAdminUid(user.uid);
+  onSnapshot(doc(db, 'games', gameId), (snap) => {
+    if (!snap.exists()) { app.innerHTML = '<p class="muted">Dieses Spiel gibt es nicht (mehr).</p>'; return; }
+    game = snap.data();
+    if (game.mode === 'tournament' && !tSubscribed) {
+      tSubscribed = true;
+      watchPlayers((p) => { players = p; render(); });
+      watchTournamentGames((g) => { tgames = g; render(); });
+    }
+    render();
+  });
+  watchEvents(gameId, (evs) => { events = evs; render(); });
+})();
+</script>
+</body>
+</html>

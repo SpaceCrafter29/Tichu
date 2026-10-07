@@ -446,6 +446,25 @@ function render() {
   else if (round.over) app.appendChild(renderRoundOver());
   else if (!round.schupfenDone) app.appendChild(renderSchupfen());
   else app.appendChild(renderPlaying());
+  app.appendChild(renderSpectatorLink());
+}
+
+// Link für Zuschauer (spectate.html): zeigt nur öffentliche Züge. Im Turnier funktioniert er
+// für andere erst nach Spielende.
+function renderSpectatorLink() {
+  const wrap = document.createElement('p');
+  wrap.style.margin = '24px 0 0';
+  const btn = document.createElement('button');
+  btn.className = 'secondary';
+  btn.style.cssText = 'padding: 6px 12px; font-size: 0.85rem;';
+  btn.textContent = 'Zuschauer-Link kopieren';
+  btn.addEventListener('click', async () => {
+    const url = new URL(`spectate.html?g=${gameId}`, location.href).href;
+    try { await navigator.clipboard.writeText(url); btn.textContent = 'Link kopiert'; }
+    catch { window.prompt('Zuschauer-Link:', url); }
+  });
+  wrap.appendChild(btn);
+  return wrap;
 }
 
 function renderGrandTichu() {
