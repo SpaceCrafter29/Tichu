@@ -77,7 +77,7 @@ import {
 } from './lib/tournamentAuth.js';
 import {
   genPassword, watchPlayers, watchSchedules, watchTournamentGames, saveSchedule,
-  joinAssignedSeat, computeStandings, adminChangeSeats,
+  joinAssignedSeat, computeStandings, adminChangeSeats, adminSetResult,
 } from './lib/tournament.js';
 
 function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
@@ -103,6 +103,7 @@ let draftDay = 1;
 let draftTables = [];  // [{ seats:[uid,uid,uid,uid], target:1000 }] oder Turnierbaum-Tisch { derived:[gameId,gameId], seats:[], target } - Entwurf, bis "Speichern"
 let planMsg = '';
 let joinBusy = false, joinErr = '';
+let resultEdit = null; // Admin: { gameId, a:'', b:'' } - Ergebnis von Hand eintragen
 let editSeats = null;  // Admin: { gameId, seats:[uid x4] } - Sitze eines gespeicherten, noch leeren Tisches ändern
 let pendingEdit = null; // aus Link: { gameId, names:[4] }, wird aufgelöst sobald players geladen sind
 
@@ -326,6 +327,21 @@ const A = {
     planMsg = ''; render();
   },
   cancelEdit: () => { editSeats = null; render(); },
+  editResult: (gameId) => { resultEdit = { gameId, a: '', b: '' }; planMsg = ''; render(); },
+  cancelResult: () => { resultEdit = null; render(); },
+  saveResult: async () => {
+    if (!resultEdit) return;
+    const a = Number(resultEdit.a), b = Number(resultEdit.b);
+    const g = games.find((x) => x.id === resultEdit.gameId);
+    if (!g || !confirm(`Ergebnis wirklich eintragen? Team A (${(g.seatUids || []).filter((_, i) => i % 2 === 0).map(usernameOf).join(' + ')}): ${a} · Team B: ${b}`)) return;
+    try {
+      await adminSetResult(resultEdit.gameId, a, b);
+      planMsg = 'Gespeichert – Ergebnis eingetragen.'; resultEdit = null;
+    } catch (e) {
+      planMsg = 'Fehler: ' + (e.message || e);
+    }
+    render();
+  },
   saveEdit: async () => {
     if (!editSeats) return;
     try {
@@ -420,7 +436,7 @@ function planView() {
   const card = (g) => {
     const st = statusOf(g);
     const editing = editSeats && editSeats.gameId === g.id;
-    const editable = g.seatUids && g.status === 'waiting' && g.seats.every((x) => x == null);
+    const editable = g.seatUids && g.status === 'waiting';
     if (editing) {
       const opts = players.map((p) => p.uid);
       return `<section class="panel stack" style="border-color:var(--accent)"><div class="row"><h2 style="font-size:18px">Tisch ${schedules.find((x) => x.tables.some((t) => t.gameId === g.id)).tables.findIndex((t) => t.gameId === g.id) + 1}</h2><span class="chip">Sitze ändern</span></div>
@@ -433,6 +449,12 @@ function planView() {
         ? `<div class="grid2">${g.seatUids.map((uid, si) => `<div class="seat${g.seats[si] ? ' ready' : ''}"><b>${esc(usernameOf(uid))}</b><span class="small muted">${g.seats[si] ? 'da' : 'noch nicht da'}</span></div>`).join('')}</div>`
         : `<p class="muted" style="margin:0;font-size:14px">Gesperrt - wird freigegeben, sobald ${esc((g.sourceGameIds || []).map(tableLabel).join(' und '))} entschieden sind.</p>`}
       ${editable ? `<button class="sm" data-act="editTable" data-a="${esc(g.id)}">Sitze ändern</button>` : ''}
+      ${g.seatUids && g.status !== 'finished' ? (resultEdit && resultEdit.gameId === g.id
+        ? `<div class="stack" style="gap:8px;border-top:1px solid var(--line);padding-top:10px"><span class="small muted">Team A = Sitz 1+3 (${esc([0, 2].map((i) => usernameOf(g.seatUids[i])).join(' + '))}) · Team B = Sitz 2+4 (${esc([1, 3].map((i) => usernameOf(g.seatUids[i])).join(' + '))})</span>
+            <div class="grid2"><div class="field"><label>Punkte Team A</label><input type="number" inputmode="numeric" data-resa value="${esc(resultEdit.a)}"></div>
+            <div class="field"><label>Punkte Team B</label><input type="number" inputmode="numeric" data-resb value="${esc(resultEdit.b)}"></div></div>
+            <div style="display:flex;gap:10px"><button class="primary" data-act="saveResult">Ergebnis speichern</button><button data-act="cancelResult">Abbrechen</button></div></div>`
+        : `<button class="sm" data-act="editResult" data-a="${esc(g.id)}">Ergebnis eintragen</button>`) : ''}
     </section>`;
   };
   const roundSections = schedules.map((sc) => {
@@ -584,6 +606,8 @@ document.addEventListener('input', (e) => {
   else if (k === 'loginP') loginP = e.target.value;
   else if (k === 'newU') newU = e.target.value;
   else if (k === 'newP') newP = e.target.value;
+  else if (e.target.dataset && e.target.dataset.resa !== undefined && resultEdit) resultEdit.a = e.target.value;
+  else if (e.target.dataset && e.target.dataset.resb !== undefined && resultEdit) resultEdit.b = e.target.value;
 });
 document.addEventListener('change', (e) => {
   const d = e.target.dataset || {};
