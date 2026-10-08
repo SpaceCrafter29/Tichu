@@ -152,6 +152,13 @@ function myActiveGame() {
     .filter((g) => g.seatUids && g.seatUids.includes(me.uid) && g.status !== 'finished')
     .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0))[0] || null;
 }
+// Darf `me` laufende Tische anderer live ansehen? Nur Admin oder wer selbst schon fertig ist.
+function iAmDone() {
+  if (isAdmin) return true;
+  if (!me) return false;
+  const mine = games.filter((g) => g.seatUids && g.seatUids.includes(me.uid));
+  return mine.some((g) => g.status === 'finished') && !mine.some((g) => g.status !== 'finished');
+}
 function finishedGames() { return games.filter((g) => g.status === 'finished'); }
 // Die Runde, in der gerade gespielt wird: die erste mit noch nicht beendeten Tischen (sonst die letzte).
 function currentDay() {
@@ -507,9 +514,11 @@ function standingsView() {
         <span class="small muted">Wartet auf ${esc((g.sourceGameIds || []).map(tableLabel).join(' und '))}</span></div>`;
     }
     const names = g.seatUids.map(usernameOf);
+    const watch = g.status === 'finished' || (g.status !== 'waiting' && iAmDone());
     return `<div class="today"><div class="row"><b>${esc(roundNameOf(g))}</b><span class="small" style="color:${st.cls === 'playing' ? '#ffb27a' : st.cls === 'finished' ? 'var(--ok)' : 'var(--muted)'}">${st.short}</span></div>
       <div class="row"><span>${esc(names[0] + ' + ' + names[2])}</span><span class="num">${g.result ? g.result.scoreA : '–'}</span></div>
-      <div class="row"><span>${esc(names[1] + ' + ' + names[3])}</span><span class="num">${g.result ? g.result.scoreB : '–'}</span></div></div>`;
+      <div class="row"><span>${esc(names[1] + ' + ' + names[3])}</span><span class="num">${g.result ? g.result.scoreB : '–'}</span></div>
+      ${watch ? `<a href="spectate.html?g=${esc(g.id)}" style="color:var(--accent);font-size:14px">${g.status === 'finished' ? 'Spiel ansehen' : 'Live zuschauen'}</a>` : ''}</div>`;
   }).join('');
   const history = finishedGames().slice().reverse().slice(0, 8).map((g) => {
     const names = g.seatUids.map(usernameOf);

@@ -84,8 +84,14 @@ function render() {
   if (!game) return;
   const finished = game.status === 'finished';
   if (game.mode === 'tournament' && !finished && !admin) {
-    app.innerHTML = `<div class="panel"><h2>Noch nicht freigegeben</h2><p class="muted" style="margin:0">Turnier-Spiele kann man erst nach dem Ende anschauen, damit niemand live mitliest und Infos weitergibt.</p></div>`;
-    return;
+    // Live zuschauen darf nur, wer selbst schon fertig ist (mindestens ein beendetes Match und
+    // keins mehr offen) - wer noch spielt, könnte sonst Infos von Zuschauern bekommen.
+    const mine = tgames.filter((g) => g.seatUids && g.seatUids.includes(user.uid));
+    const done = mine.some((g) => g.status === 'finished') && !mine.some((g) => g.status !== 'finished');
+    if (!done) {
+      app.innerHTML = `<div class="panel"><h2>Noch nicht freigegeben</h2><p class="muted" style="margin:0">Turnier-Spiele kann man live erst ansehen, wenn man mit seinem eigenen Match fertig ist - und beendete Spiele jederzeit. So liest niemand live mit und gibt Infos weiter.</p></div>`;
+      return;
+    }
   }
   const rounds = [[]];
   for (const ev of events) {
@@ -96,7 +102,14 @@ function render() {
   const r = game.result;
   const statusChip = finished ? '<span class="chip done">beendet</span>' : `<span class="chip live">${game.status === 'waiting' ? 'wartet' : 'läuft'}</span>`;
   const seats = [0, 1, 2, 3].map(seatName);
+  const allEv = events.filter((e) => e.type === 'play' || e.type === 'pass');
+  const lastTs = events.length && events[events.length - 1].createdAt && events[events.length - 1].createdAt.toDate
+    ? events[events.length - 1].createdAt.toDate().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : null;
+  const progress = events.length
+    ? `Spielrunde ${rounds.length} · ${allEv.length} Züge${lastTs ? ` · letzte Aktivität ${lastTs}` : ''}`
+    : '';
   app.innerHTML = `<div class="panel"><div class="row"><h2 style="margin:0">${esc(game.name ? 'Tisch ' + game.name : 'Tisch')}</h2>${statusChip}</div>
+    ${progress ? `<p style="margin:8px 0 0">${esc(progress)}</p>` : ''}
     <p class="muted" style="margin:8px 0 0">Team A: ${esc(seats[0] + ' + ' + seats[2])} · Team B: ${esc(seats[1] + ' + ' + seats[3])}</p>
     ${r ? `<p style="margin:8px 0 0"><b>${esc(r.scoreA)} : ${esc(r.scoreB)}</b> <span class="muted">(Team ${esc(r.winnerTeam)} gewinnt)</span></p>` : ''}
     <p class="muted" style="margin:8px 0 0;font-size:13px">Du siehst nur öffentliche Züge, keine Hände. ${finished ? '' : 'Aktualisiert sich live.'}</p></div>`
