@@ -120,6 +120,7 @@ let pendingDraftUsernames = null; // [{ names:[4], target }] - bis players gelad
   if (prefill.has('newU')) newU = prefill.get('newU');
   if (prefill.has('newP')) newP = prefill.get('newP');
   if (prefill.has('day')) draftDay = Number(prefill.get('day')) || draftDay;
+  if (prefill.has('res')) resultEdit = { gameId: prefill.get('res'), a: prefill.get('a') || '', b: prefill.get('b') || '' };
   if (prefill.has('edit') && prefill.has('seats')) pendingEdit = { gameId: prefill.get('edit'), names: prefill.get('seats').split(',') };
   if (prefill.has('draft')) {
     const target = Number(prefill.get('target')) || 1000;
