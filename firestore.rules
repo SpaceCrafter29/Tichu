@@ -167,7 +167,7 @@ service cloud.firestore {
             ))
           || (isParticipant(gameId)
             && resource.data.mode == 'tournament'
-            && resource.data.result == null
+            && resource.data.get('result', null) == null
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['result', 'status'])
             && request.resource.data.status == 'finished')
         );
