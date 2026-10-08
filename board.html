@@ -297,6 +297,7 @@ let schupfenDraft = {}; // {toSeat: cardId}
 let schupfenPendingCardId = null; // gerade angetippte, noch nicht zugeordnete Karte
 let errorMsg = '';
 let playAgainClicked = false;
+let tournamentResultState = null; // null | 'saving' | 'saved' | 'failed' - Turnier: Ergebnis-Speicherung
 let tournamentResultAttempted = false; // verhindert wiederholte finishTournamentMatch()-Versuche
 // bei jedem Re-Render, sobald einmal (erfolgreich oder nicht) versucht wurde - ein doppelter
 // Schreibversuch würde ohnehin nur an der "result bereits gesetzt"-Regel scheitern, siehe
@@ -806,16 +807,34 @@ function renderRoundOver() {
   const matchOver = wc.type === 'rounds' ? roundsCompleted >= wc.count : (finalScore[0] >= wc.target || finalScore[1] >= wc.target);
   if (matchOver && gameMeta && gameMeta.mode === 'tournament' && gameMeta.result == null && !tournamentResultAttempted) {
     tournamentResultAttempted = true;
-    finishTournamentMatch(gameId, finalScore[0], finalScore[1]).catch((e) => console.warn('Turnier-Ergebnis konnte nicht gespeichert werden:', e));
+    tournamentResultState = 'saving';
+    finishTournamentMatch(gameId, finalScore[0], finalScore[1])
+      .then(() => { tournamentResultState = 'saved'; render(); })
+      .catch((e) => { console.warn('Turnier-Ergebnis konnte nicht gespeichert werden:', e); tournamentResultState = 'failed'; render(); });
   }
+  const isTournament = !!(gameMeta && gameMeta.mode === 'tournament');
   if (matchOver) {
     const winner = finalScore[0] === finalScore[1] ? null : (finalScore[0] > finalScore[1] ? 0 : 1);
     const p = document.createElement('p');
     p.innerHTML = `<b>Match beendet</b> - ${winner == null ? 'Unentschieden' : 'Team ' + teamNames[winner] + ' gewinnt!'}`;
     wrap.appendChild(p);
+    if (isTournament) {
+      // Der Tisch ist damit geschlossen (status: finished, Ergebnis gespeichert) - wer weiter ist,
+      // sieht den Finaltisch unter "Mein Tisch", sobald alle Vorrunden-Tische entschieden sind.
+      const saved = gameMeta.result != null || tournamentResultState === 'saved';
+      const note = document.createElement('p');
+      note.className = 'muted';
+      note.textContent = saved ? 'Ergebnis gespeichert, der Tisch ist geschlossen. Alles Weitere siehst du im Turnier.'
+        : tournamentResultState === 'failed' ? 'Das Ergebnis konnte nicht automatisch gespeichert werden - die Turnierleitung trägt es ein.'
+        : 'Ergebnis wird gespeichert…';
+      wrap.appendChild(note);
+    }
     const btn = document.createElement('button');
-    btn.textContent = 'Zurück zum Menü';
-    btn.addEventListener('click', () => { window.location.href = 'menu.html'; });
+    btn.textContent = isTournament ? 'Weiter zum Turnier' : 'Zurück zum Menü';
+    btn.addEventListener('click', () => {
+      if (isTournament) localStorage.removeItem('tichu.mySeat');
+      window.location.href = isTournament ? 'turnier.html' : 'menu.html';
+    });
     wrap.appendChild(btn);
   } else {
     const again = document.createElement('button');

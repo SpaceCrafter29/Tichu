@@ -527,10 +527,34 @@ function standingsView() {
     </div></div>`;
 }
 
+// Das zuletzt beendete Spiel von `me` (für die Anzeige des Ergebnisses und des Weiterkommens).
+function myLastFinished() {
+  if (!me) return null;
+  return games
+    .filter((g) => g.seatUids && g.seatUids.includes(me.uid) && g.status === 'finished' && g.result)
+    .sort((a, b) => (b.result.finishedAt?.seconds || 0) - (a.result.finishedAt?.seconds || 0))[0] || null;
+}
+
 function mineView() {
   const g = myActiveGame();
   let body;
-  if (!g) {
+  if (!g && myLastFinished()) {
+    const f = myLastFinished();
+    const seatIndex = f.seatUids.indexOf(me.uid);
+    const mineA = seatIndex % 2 === 0;
+    const won = mineA === (f.result.winnerTeam === 'A');
+    const follow = games.find((x) => (x.sourceGameIds || []).includes(f.id));
+    const other = follow && follow.sourceGameIds.find((id) => id !== f.id);
+    const otherName = other ? tableLabel(other) : '';
+    const hint = !won ? 'Du bist ausgeschieden - danke fürs Mitspielen!'
+      : follow ? `Ihr seid weiter! Das Finale wird freigegeben, sobald ${esc(otherName)} entschieden ist - dann erscheint hier dein Tisch.`
+      : 'Ihr habt gewonnen. Die nächste Runde legt die Turnierleitung an.';
+    body = `<section class="panel stack" style="gap:12px;border-color:${won ? 'var(--accent)' : 'var(--border)'}"><div class="stack" style="gap:4px"><span class="small muted">Dein Match ist beendet</span><h2 style="font-size:26px">${won ? 'Ihr habt gewonnen' : 'Verloren'}</h2></div>
+      <div class="grid2"><div class="panel"><b>Du + Partner</b><br><span class="num" style="font-size:28px">${mineA ? f.result.scoreA : f.result.scoreB}</span></div>
+      <div class="panel"><b>Gegner 1 + 2</b><br><span class="num" style="font-size:28px">${mineA ? f.result.scoreB : f.result.scoreA}</span></div></div>
+      <p style="margin:0">${hint}</p>
+      <a href="spectate.html?g=${esc(f.id)}" style="color:var(--accent)">Spiel ansehen (Link zum Teilen)</a></section>`;
+  } else if (!g) {
     body = `<section class="panel stack" style="gap:8px"><h2 style="font-size:20px">Gerade kein Tisch</h2><p class="muted" style="margin:0">Der Admin hat dich noch nicht eingeteilt oder den Spielplan noch nicht gespeichert.</p></section>`;
   } else {
     const seatIndex = g.seatUids.indexOf(me.uid);
