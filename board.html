@@ -223,9 +223,11 @@ function comboLabel(combo) {
 // braucht keine weitere Firestore-Schreibkoordination. Werden nur verarbeitet, solange die
 // aktuelle Runde schon vorbei ist (`round.over`) - ein verfrühtes/doppeltes `newRound` (z. B.
 // zwei Leute klicken gleichzeitig "Nochmal spielen") wird sonst ignoriert.
-function replay(first8, rest6, legacy, events) {
+// startScore: Punktestand, mit dem der Tisch beginnt (z. B. nach einem Reset durch die Admin, die den
+// Stand vor dem Reset beibehält - siehe adminResetTable() in lib/tournament.js).
+function replay(first8, rest6, legacy, events, startScore) {
   let round = legacy ? new Round({ hands: first8 }) : new Round({ first8, rest6 });
-  let matchScore = [0, 0];
+  let matchScore = Array.isArray(startScore) ? [Number(startScore[0]) || 0, Number(startScore[1]) || 0] : [0, 0];
   let schupfenSubs = {};
   let roundsCompleted = 0; // für die "Best of N Runden"-Siegbedingung, siehe renderRoundOver()
   for (const ev of events) {
@@ -380,7 +382,7 @@ async function start() {
   if (!initialDeal) return;
   watchEvents(gameId, (evs) => {
     events = evs;
-    const result = replay(initialDeal.first8, initialDeal.rest6, initialDeal.legacy, events);
+    const result = replay(initialDeal.first8, initialDeal.rest6, initialDeal.legacy, events, gameMeta && gameMeta.startScore);
     round = result.round;
     matchScore = result.matchScore;
     currentSchupfenSubs = result.schupfenSubs;

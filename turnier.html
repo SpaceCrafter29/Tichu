@@ -78,12 +78,12 @@ import {
 import {
   genPassword, watchPlayers, watchSchedules, watchTournamentGames, saveSchedule,
   joinAssignedSeat, computeStandings, adminChangeSeats, adminSetResult, adminResetTable,
-} from './lib/tournament.js?v=20261010b';
+} from './lib/tournament.js?v=20261010c';
 
 function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function shuffled(a) { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
 
-const BUILD = '20261010b'; // zur Kontrolle sichtbar unten auf der Seite (siehe render())
+const BUILD = '20261010c'; // zur Kontrolle sichtbar unten auf der Seite (siehe render())
 const app = document.getElementById('app');
 
 // ---------- Zustand ----------
@@ -104,6 +104,7 @@ let draftDay = 1;
 let draftTables = [];  // [{ seats:[uid,uid,uid,uid], target:1000 }] oder Turnierbaum-Tisch { derived:[gameId,gameId], seats:[], target } - Entwurf, bis "Speichern"
 let planMsg = '';
 let joinBusy = false, joinErr = '';
+let resetScore = null; // aus Link (&sa=&sb=): Startstand [Team A, Team B] für den Reset
 let resetPrompt = null; // aus Link (?reset=<tisch>): Tisch, der mit einem großen Button zurückgesetzt werden kann
 let resultEdit = null; // Admin: { gameId, a:'', b:'' } - Ergebnis von Hand eintragen
 let editSeats = null;  // Admin: { gameId, seats:[uid x4] } - Sitze eines gespeicherten, noch leeren Tisches ändern
@@ -123,6 +124,7 @@ let pendingDraftUsernames = null; // [{ names:[4], target }] - bis players gelad
   if (prefill.has('newP')) newP = prefill.get('newP');
   if (prefill.has('day')) draftDay = Number(prefill.get('day')) || draftDay;
   if (prefill.has('reset')) resetPrompt = prefill.get('reset');
+  if (prefill.has('sa') && prefill.has('sb')) resetScore = [Number(prefill.get('sa')), Number(prefill.get('sb'))];
   if (prefill.has('res')) resultEdit = { gameId: prefill.get('res'), a: prefill.get('a') || '', b: prefill.get('b') || '' };
   if (prefill.has('edit') && prefill.has('seats')) pendingEdit = { gameId: prefill.get('edit'), names: prefill.get('seats').split(',') };
   if (prefill.has('draft')) {
@@ -339,9 +341,10 @@ const A = {
   },
   cancelEdit: () => { editSeats = null; render(); },
   resetTable: async (gameId) => {
-    if (!confirm('Tisch wirklich zurücksetzen? Alle werden ausgetragen, der bisherige Spielstand dieses Tisches geht verloren.')) return;
+    const score = resetPrompt === gameId ? resetScore : null;
+    if (!confirm('Tisch wirklich zurücksetzen? Alle werden ausgetragen, die Hände und bisherigen Züge werden gelöscht.' + (score ? ` Der Tisch startet mit dem Stand Team A ${score[0]} : ${score[1]} Team B.` : ' Der Punktestand beginnt wieder bei 0:0.'))) return;
     try {
-      await adminResetTable(gameId);
+      await adminResetTable(gameId, score);
       planMsg = 'Gespeichert – Tisch zurückgesetzt, alle können ihn neu betreten.'; resetPrompt = null;
     } catch (e) {
       planMsg = 'Fehler: ' + (e.message || e);
@@ -494,7 +497,7 @@ function planView() {
   const resetGame = resetPrompt && games.find((g) => g.id === resetPrompt && g.status !== 'finished');
   const resetBox = resetGame
     ? `<section class="panel stack" style="border-color:var(--accent);margin-bottom:20px"><h2>${esc(roundNameOf(resetGame))} zurücksetzen?</h2>
-        <p class="muted" style="margin:0">Alle werden ausgetragen, Hände und bisherige Züge dieses Tisches werden gelöscht. Danach betreten die vier ihn neu.</p>
+        <p class="muted" style="margin:0">Alle werden ausgetragen, Hände und bisherige Züge dieses Tisches werden gelöscht. Danach betreten die vier ihn neu.${resetScore ? ` <b>Startstand: Team A (${esc([0, 2].map((i) => usernameOf((resetGame.seatUids || [])[i])).join(' + '))}) ${resetScore[0]} : ${resetScore[1]} Team B (${esc([1, 3].map((i) => usernameOf((resetGame.seatUids || [])[i])).join(' + '))})</b>` : ' Der Punktestand beginnt wieder bei 0:0.'}</p>
         <div style="display:flex;gap:10px"><button class="primary" data-act="resetTable" data-a="${esc(resetGame.id)}">Tisch jetzt zurücksetzen</button><button data-act="cancelReset">Abbrechen</button></div></section>`
     : '';
   return resetBox + (planMsg ? `<p role="status" class="msg ${cls}" style="margin-bottom:16px">${esc(planMsg)}</p>` : '') +
