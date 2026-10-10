@@ -78,11 +78,12 @@ import {
 import {
   genPassword, watchPlayers, watchSchedules, watchTournamentGames, saveSchedule,
   joinAssignedSeat, computeStandings, adminChangeSeats, adminSetResult, adminResetTable,
-} from './lib/tournament.js';
+} from './lib/tournament.js?v=20261010b';
 
 function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function shuffled(a) { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
 
+const BUILD = '20261010b'; // zur Kontrolle sichtbar unten auf der Seite (siehe render())
 const app = document.getElementById('app');
 
 // ---------- Zustand ----------
@@ -642,7 +643,8 @@ function render() {
     <nav class="d-nav" aria-label="Bereiche">${tabBtns}</nav>
     <div style="display:flex;align-items:center;gap:10px" class="small muted">${isAdmin ? 'Admin' : esc(me ? me.username : '')}<button class="sm" data-act="logout">Abmelden</button></div></header>
     <div class="d-title"><h1>${esc(tt[0])}</h1><p class="muted" style="margin:6px 0 0">${esc(tt[1])}</p></div>
-    ${contentFor(k)}`;
+    ${contentFor(k)}
+    <p class="small muted" style="margin-top:32px">Version ${BUILD}</p>`;
 }
 
 // ---------- Events ----------
