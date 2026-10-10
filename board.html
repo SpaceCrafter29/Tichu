@@ -85,7 +85,7 @@ import {
 } from './lib/lobby.js';
 import { finishTournamentMatch } from './lib/tournament.js';
 import { Round, teamOf } from './engine/game.js';
-import { sortHand, cardPoints } from './engine/cards.js';
+import { sortHand, cardPoints, createDeck } from './engine/cards.js';
 import { classify, canBeat } from './engine/combos.js';
 
 // --- Auth/Setup ------------------------------------------------------------
@@ -129,7 +129,7 @@ watchGame(gameId, (game) => {
         ? `Der Tisch wurde zurückgesetzt: ${seatLabel(lastKick.seatIndex)} wurde wegen Inaktivität vom Tisch entfernt.`
         : 'Der Tisch wurde zurückgesetzt.';
       localStorage.removeItem('tichu.mySeat');
-      window.location.href = `menu.html?notice=${encodeURIComponent(notice)}`;
+      window.location.href = game.mode === 'tournament' ? 'turnier.html' : `menu.html?notice=${encodeURIComponent(notice)}`;
       return;
     }
     lastKnownStatus = game.status;
@@ -572,7 +572,8 @@ function renderGrandTichu() {
 
 function renderSchupfen() {
   const wrap = document.createElement('div');
-  const others = [0, 1, 2, 3].filter((s) => s !== mySeat);
+  // Reihenfolge der Ziele: linker Gegner, Partner (immer in der Mitte), rechter Gegner.
+  const others = [(mySeat + 1) % 4, (mySeat + 2) % 4, (mySeat + 3) % 4];
 
   const status = document.createElement('p');
   status.className = 'sub';
@@ -665,6 +666,55 @@ function renderSchupfen() {
   }));
   wrap.appendChild(submit);
   return wrap;
+}
+
+// Kartennummern sind in jedem Spiel dieselben (siehe createDeck()), daher lässt sich aus den
+// Schupfen-Ereignissen jederzeit ablesen, wer was gegeben hat.
+const DECK_BY_ID = Object.fromEntries(createDeck().map((c) => [c.id, c]));
+function cardText(id) {
+  const c = DECK_BY_ID[id];
+  if (!c) return '?';
+  return c.special ? SPECIAL_ICON[c.special].label : `${labelFor(c)} ${c.suit}`;
+}
+let schupfenHistoryOpen = false;
+
+// "Geschupft": was man selbst weitergegeben und von wem man was bekommen hat - diese Runde
+// als Karten (linker Gegner | Partner | rechter Gegner), frühere Runden als Liste.
+function renderSchupfenSummary() {
+  if (!round || !round.schupfenDone || !currentSchupfenSubs[mySeat]) return null;
+  const order = [(mySeat + 1) % 4, (mySeat + 2) % 4, (mySeat + 3) % 4];
+  const box = document.createElement('div');
+  box.className = 'panel';
+  box.style.marginTop = '14px';
+  const cols = order.map((t) => {
+    const gaveId = currentSchupfenSubs[mySeat] && currentSchupfenSubs[mySeat][t];
+    const gotId = currentSchupfenSubs[t] && currentSchupfenSubs[t][mySeat];
+    return `<div style="flex:1;min-width:90px;text-align:center"><div class="sub" style="margin:0 0 6px"><b>${esc(seatLabel(t))}</b></div>
+      <div class="sub" style="margin:0">Gegeben</div><div class="sch-card" data-id="${gaveId}"></div>
+      <div class="sub" style="margin:6px 0 0">Bekommen</div><div class="sch-card" data-id="${gotId}"></div></div>`;
+  }).join('');
+  box.innerHTML = `<div class="sub" style="margin:0 0 8px"><b>Geschupft in dieser Runde</b></div><div style="display:flex;gap:10px">${cols}</div>`;
+  box.querySelectorAll('.sch-card').forEach((el) => {
+    const c = DECK_BY_ID[el.dataset.id];
+    if (c) { el.style.display = 'flex'; el.style.justifyContent = 'center'; el.appendChild(cardEl(c, { small: true })); } else el.textContent = '–';
+  });
+  // frühere Runden dieses Matches
+  const past = [];
+  let subs = {};
+  for (const ev of events) {
+    if (ev.type === 'newRound') { if (Object.keys(subs).length === 4) past.push(subs); subs = {}; }
+    else if (ev.type === 'schupfenSubmit' && ev.payload && ev.payload.gives) subs[ev.seatIndex] = ev.payload.gives;
+  }
+  if (past.length) {
+    const d = document.createElement('details');
+    d.open = schupfenHistoryOpen;
+    d.style.marginTop = '10px';
+    d.addEventListener('toggle', () => { schupfenHistoryOpen = d.open; });
+    const lines = past.map((ps, i) => `<div class="sub" style="margin:4px 0"><b>Runde ${i + 1}:</b> ${order.map((t) => `${esc(seatLabel(t))}: gegeben ${esc(cardText(ps[mySeat] && ps[mySeat][t]))}, bekommen ${esc(cardText(ps[t] && ps[t][mySeat]))}`).join(' · ')}</div>`).reverse().join('');
+    d.innerHTML = `<summary class="sub" style="cursor:pointer">Frühere Runden (${past.length})</summary>${lines}`;
+    box.appendChild(d);
+  }
+  return box;
 }
 
 function renderPlaying() {
@@ -809,6 +859,9 @@ function renderPlaying() {
   }));
   bar.appendChild(playBtn);
   wrap.appendChild(bar);
+
+  const schupfenSummary = renderSchupfenSummary();
+  if (schupfenSummary) wrap.appendChild(schupfenSummary);
 
   return wrap;
 }
