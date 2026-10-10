@@ -103,6 +103,7 @@ let draftDay = 1;
 let draftTables = [];  // [{ seats:[uid,uid,uid,uid], target:1000 }] oder Turnierbaum-Tisch { derived:[gameId,gameId], seats:[], target } - Entwurf, bis "Speichern"
 let planMsg = '';
 let joinBusy = false, joinErr = '';
+let resetPrompt = null; // aus Link (?reset=<tisch>): Tisch, der mit einem großen Button zurückgesetzt werden kann
 let resultEdit = null; // Admin: { gameId, a:'', b:'' } - Ergebnis von Hand eintragen
 let editSeats = null;  // Admin: { gameId, seats:[uid x4] } - Sitze eines gespeicherten, noch leeren Tisches ändern
 let pendingEdit = null; // aus Link: { gameId, names:[4] }, wird aufgelöst sobald players geladen sind
@@ -120,6 +121,7 @@ let pendingDraftUsernames = null; // [{ names:[4], target }] - bis players gelad
   if (prefill.has('newU')) newU = prefill.get('newU');
   if (prefill.has('newP')) newP = prefill.get('newP');
   if (prefill.has('day')) draftDay = Number(prefill.get('day')) || draftDay;
+  if (prefill.has('reset')) resetPrompt = prefill.get('reset');
   if (prefill.has('res')) resultEdit = { gameId: prefill.get('res'), a: prefill.get('a') || '', b: prefill.get('b') || '' };
   if (prefill.has('edit') && prefill.has('seats')) pendingEdit = { gameId: prefill.get('edit'), names: prefill.get('seats').split(',') };
   if (prefill.has('draft')) {
@@ -339,12 +341,13 @@ const A = {
     if (!confirm('Tisch wirklich zurücksetzen? Alle werden ausgetragen, der bisherige Spielstand dieses Tisches geht verloren.')) return;
     try {
       await adminResetTable(gameId);
-      planMsg = 'Gespeichert – Tisch zurückgesetzt, alle können ihn neu betreten.';
+      planMsg = 'Gespeichert – Tisch zurückgesetzt, alle können ihn neu betreten.'; resetPrompt = null;
     } catch (e) {
       planMsg = 'Fehler: ' + (e.message || e);
     }
     render();
   },
+  cancelReset: () => { resetPrompt = null; render(); },
   editResult: (gameId) => { resultEdit = { gameId, a: '', b: '' }; planMsg = ''; render(); },
   cancelResult: () => { resultEdit = null; render(); },
   saveResult: async () => {
@@ -487,7 +490,13 @@ function planView() {
   games.forEach((g) => { if (g.status !== 'finished' && g.seatUids) g.seatUids.forEach((u) => busy.add(u)); });
   draftTables.forEach((t) => t.seats.forEach((u) => { if (u) busy.add(u); }));
   const unassigned = players.map((p) => p.uid).filter((u) => !busy.has(u));
-  return (planMsg ? `<p role="status" class="msg ${cls}" style="margin-bottom:16px">${esc(planMsg)}</p>` : '') +
+  const resetGame = resetPrompt && games.find((g) => g.id === resetPrompt && g.status !== 'finished');
+  const resetBox = resetGame
+    ? `<section class="panel stack" style="border-color:var(--accent);margin-bottom:20px"><h2>${esc(roundNameOf(resetGame))} zurücksetzen?</h2>
+        <p class="muted" style="margin:0">Alle werden ausgetragen, Hände und bisherige Züge dieses Tisches werden gelöscht. Danach betreten die vier ihn neu.</p>
+        <div style="display:flex;gap:10px"><button class="primary" data-act="resetTable" data-a="${esc(resetGame.id)}">Tisch jetzt zurücksetzen</button><button data-act="cancelReset">Abbrechen</button></div></section>`
+    : '';
+  return resetBox + (planMsg ? `<p role="status" class="msg ${cls}" style="margin-bottom:16px">${esc(planMsg)}</p>` : '') +
     roundSections +
     `<h2 style="margin:0 0 12px">Neuer Entwurf · Runde ${draftDay}</h2>
     <div class="tables">${cards}<button class="addtable" data-act="addTable">+ Tisch hinzufügen</button></div>
