@@ -6,7 +6,9 @@
 <title>Tichu - Spielbrett</title>
 <link rel="stylesheet" href="style.css" />
 <style>
-  body { padding: 20px 14px 60px; }
+  body { padding: 20px 14px 80px; }
+  .scorebar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; background: #141414; border-top: 1px solid var(--border); padding: 10px 14px; text-align: center; font-size: 0.95rem; }
+  .scorebar b { font-variant-numeric: tabular-nums; }
   .wrap { max-width: 1180px; margin: 0 auto; }
   h1 { font-size: 1.3rem; margin: 0 0 2px; }
   .topbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
@@ -390,6 +392,7 @@ async function start() {
     playAgainClicked = false;
     syncTurnTimer();
     render();
+    maybeAutoDeal();
   });
 }
 
@@ -448,6 +451,52 @@ function render() {
   else if (!round.schupfenDone) app.appendChild(renderSchupfen());
   else app.appendChild(renderPlaying());
   app.appendChild(renderSpectatorLink());
+  app.appendChild(renderScoreBar());
+}
+
+// Durchgehend sichtbarer Spielstand (abgeschlossene Runden, am Rundenende inkl. der gerade
+// beendeten) aus Sicht der eigenen Mannschaft.
+function renderScoreBar() {
+  const total = [matchScore[0], matchScore[1]];
+  if (round && round.over && round.result) { total[0] += round.result.teamScore[0]; total[1] += round.result.teamScore[1]; }
+  const mine = teamOf(mySeat);
+  const bar = document.createElement('div');
+  bar.className = 'scorebar';
+  bar.innerHTML = `Spielstand: Ihr <b>${total[mine]}</b> : <b>${total[1 - mine]}</b> Gegner · ${esc(describeWinCondition(gameMeta))}`;
+  return bar;
+}
+function esc(t) { return String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+
+// Turnier: nach jeder Spielrunde den Spielstand zeigen und erst weitermachen, wenn alle vier
+// "bereit" gedrückt haben. Wer als Letzter bereit drückt, teilt die nächste Runde aus; ein
+// doppeltes newRound-Ereignis wäre harmlos (replay() ignoriert es, solange die Runde nicht zu Ende ist).
+function readyInfo() {
+  let start = 0;
+  for (let i = events.length - 1; i >= 0; i--) if (events[i].type === 'newRound') { start = i + 1; break; }
+  const set = new Set();
+  let last = null;
+  for (const e of events.slice(start)) if (e.type === 'ready') { set.add(e.seatIndex); last = e.seatIndex; }
+  return { set, last };
+}
+function matchOverNow() {
+  if (!round || !round.over || !round.result) return false;
+  const wc = getWinCondition(gameMeta);
+  const fs = [matchScore[0] + round.result.teamScore[0], matchScore[1] + round.result.teamScore[1]];
+  return wc.type === 'rounds' ? roundsCompleted >= wc.count : (fs[0] >= wc.target || fs[1] >= wc.target);
+}
+let dealPosted = false;
+async function dealNextRound() {
+  const { first8, rest6 } = dealFreshRound();
+  await postEvent(gameId, mySeat, 'newRound', { first8: seatArrToMap(first8), rest6: seatArrToMap(rest6) });
+}
+function maybeAutoDeal() {
+  if (!round || !round.over) { dealPosted = false; return; }
+  if (!(gameMeta && gameMeta.mode === 'tournament') || matchOverNow() || dealPosted) return;
+  const rs = readyInfo();
+  if (rs.set.size === 4 && rs.last === mySeat) {
+    dealPosted = true;
+    dealNextRound().catch((e) => { dealPosted = false; errorMsg = e.message || String(e); render(); });
+  }
 }
 
 // Link für Zuschauer (spectate.html): zeigt nur öffentliche Züge. Im Turnier funktioniert er
@@ -780,7 +829,12 @@ function renderRoundOver() {
 
   const grid = document.createElement('div');
   grid.className = 'result-grid';
-  const teamNames = ['Süd - Nord', 'West - Ost'];
+  // Im Turnier keine festen Positionen (Süd/Nord/...) verraten, nur "Euer Team"/"Gegner".
+  const tournamentView = !!(gameMeta && gameMeta.mode === 'tournament');
+  const teamNames = tournamentView
+    ? (teamOf(mySeat) === 0 ? ['Euer Team', 'Gegner'] : ['Gegner', 'Euer Team'])
+    : ['Süd - Nord', 'West - Ost'];
+  const teamTitle = (t) => (tournamentView ? teamNames[t] : `Team ${teamNames[t]}`);
   const teamSeats = [[2, 0], [3, 1]];
   for (let t = 0; t < 2; t++) {
     const box = document.createElement('div');
@@ -792,7 +846,7 @@ function renderRoundOver() {
     if (lastPlaceSeat != null && !teamSeats[t].includes(lastPlaceSeat) && lastPlaceHandPoints !== 0) {
       rows += `<div class="row">Restkarten von ${seatLabel(lastPlaceSeat)}: ${lastPlaceHandPoints} Punkte</div>`;
     }
-    box.innerHTML = `<h3>Team ${teamNames[t]}</h3>${rows}<div class="total">${r.teamScore[t]} Punkte</div>`;
+    box.innerHTML = `<h3>${teamTitle(t)}</h3>${rows}<div class="total">${r.teamScore[t]} Punkte</div>`;
     grid.appendChild(box);
   }
   wrap.appendChild(grid);
@@ -816,7 +870,7 @@ function renderRoundOver() {
   if (matchOver) {
     const winner = finalScore[0] === finalScore[1] ? null : (finalScore[0] > finalScore[1] ? 0 : 1);
     const p = document.createElement('p');
-    p.innerHTML = `<b>Match beendet</b> - ${winner == null ? 'Unentschieden' : 'Team ' + teamNames[winner] + ' gewinnt!'}`;
+    p.innerHTML = `<b>Match beendet</b> - ${winner == null ? 'Unentschieden' : (tournamentView ? teamNames[winner] : 'Team ' + teamNames[winner]) + ' gewinnt!'}`;
     wrap.appendChild(p);
     if (isTournament) {
       // Der Tisch ist damit geschlossen (status: finished, Ergebnis gespeichert) - wer weiter ist,
@@ -836,6 +890,25 @@ function renderRoundOver() {
       window.location.href = isTournament ? 'turnier.html' : 'menu.html';
     });
     wrap.appendChild(btn);
+  } else if (isTournament) {
+    const rs = readyInfo();
+    const iAmReady = rs.set.has(mySeat);
+    const info = document.createElement('p');
+    info.innerHTML = `<b>Nächste Runde:</b> ${rs.set.size}/4 bereit${rs.set.size ? ' (' + [...rs.set].map((x) => esc(seatLabel(x))).join(', ') + ')' : ''}`;
+    wrap.appendChild(info);
+    const ready = document.createElement('button');
+    ready.textContent = iAmReady ? 'Warte auf die anderen…' : 'Bereit für nächste Runde';
+    ready.disabled = iAmReady;
+    ready.addEventListener('click', withError(async () => { await postEvent(gameId, mySeat, 'ready', {}); }));
+    wrap.appendChild(ready);
+    if (rs.set.size === 4) {
+      const go = document.createElement('button');
+      go.className = 'secondary';
+      go.style.marginLeft = '8px';
+      go.textContent = 'Jetzt austeilen';
+      go.addEventListener('click', withError(async () => { await dealNextRound(); }));
+      wrap.appendChild(go);
+    }
   } else {
     const again = document.createElement('button');
     again.textContent = playAgainClicked ? 'Nächste Runde startet…' : 'Nochmal spielen';
