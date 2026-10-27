@@ -389,6 +389,32 @@ test('Wunsch erzwingen: außer der Reihe geworfene Bombe wird nicht durch den Wu
   assert.equal(round.currentTrick.winnerIdx, 0);
 });
 
+test('Wunsch erzwingen: erlaubte Karten = nur die Farben des Wunschrangs (Einzelkarte)', () => {
+  const hand = [card('Jade', 7), card('Schwert', 7), card('Pagode', 9), card('Stern', 13)];
+  const ids = forcedWishRound(hand, [card('Stern', 5)], 7).wishAllowedCardIds(0);
+  assert.deepEqual([...ids].sort(), ['Jade7', 'Schwert7']);
+});
+
+test('Wunsch erzwingen: erlaubte Karten bei Paar = Wunschkarte + Phönix', () => {
+  const hand = [card('Jade', 7), special('PHOENIX'), card('Pagode', 9), card('Stern', 13)];
+  const ids = forcedWishRound(hand, [card('Stern', 5), card('Pagode', 5)], 7).wishAllowedCardIds(0);
+  assert.deepEqual([...ids].sort(), ['Jade7', 'PHOENIX']);
+});
+
+test('Wunsch erzwingen: nicht verpflichtet -> keine Einschränkung (null); Bombenkarten werden nicht angeboten', () => {
+  const free = forcedWishRound([card('Jade', 7), card('Pagode', 14)], [card('Stern', 13)], 7);
+  assert.equal(free.wishAllowedCardIds(0), null);
+  const quad = [card('Jade', 9), card('Schwert', 9), card('Pagode', 9), card('Stern', 9)];
+  const ids = forcedWishRound([card('Jade', 7), card('Jade', 2), ...quad], [card('Stern', 5)], 7).wishAllowedCardIds(0);
+  assert.deepEqual([...ids], ['Jade7']);
+});
+
+test('Wunsch erzwingen: beim Anspielen sind Straßen-Partner der Wunschkarte erlaubt, Fremdkarten nicht', () => {
+  const hand = [7, 8, 9, 10, 11].map((r, i) => card(['Jade', 'Schwert', 'Pagode', 'Stern', 'Jade'][i], r)).concat([card('Schwert', 3)]);
+  const ids = forcedWishRound(hand, null, 7).wishAllowedCardIds(0);
+  assert.ok(ids.has('Jade7') && ids.has('Schwert8') && ids.has('Stern10') && !ids.has('Schwert3'));
+});
+
 test('validatePlay/validatePass verändern nichts', () => {
   const round = forcedWishRound([card('Jade', 7), card('Schwert', 9)], [card('Stern', 5)], 7);
   assert.throws(() => round.validatePlay(0, [card('Schwert', 9)]), /Wunsch/);

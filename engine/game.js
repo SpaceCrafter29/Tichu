@@ -157,6 +157,34 @@ export class Round {
     return pick(0, false);
   }
 
+  // Solange `playerIdx` den Wunsch erfüllen MUSS: die Karten (ids), die in einer Kombination mit dem
+  // Wunschrang vorkommen - sonst null. Alles andere kann das Spielbrett ausgrauen. (Bomben sind
+  // regeltechnisch weiter erlaubt, werden hier aber bewusst nicht angeboten.)
+  wishAllowedCardIds(playerIdx) {
+    if (!this.wishPendingFulfillable(playerIdx)) return null;
+    const hand = this.hands[playerIdx];
+    const current = this.currentTrick.combo;
+    const isWishCard = (c) => c.rank === this.pendingWish && !c.special;
+    const allowed = new Set();
+    const sizes = current === null ? hand.map((_, i) => i + 1) : [current.length];
+    const chosen = [];
+    const walk = (n, start, hasWish) => {
+      if (chosen.length === n) {
+        if (!hasWish) return;
+        const combo = classify(chosen);
+        if (combo && !combo.isBomb && canBeat(combo, current)) chosen.forEach((c) => allowed.add(c.id));
+        return;
+      }
+      for (let i = start; i <= hand.length - (n - chosen.length); i++) {
+        chosen.push(hand[i]);
+        walk(n, i + 1, hasWish || isWishCard(hand[i]));
+        chosen.pop();
+      }
+    };
+    for (const n of sizes) if (n <= hand.length) walk(n, 0, false);
+    return allowed;
+  }
+
   // Prüft einen Zug, ohne etwas zu verändern (wirft bei Regelverstoß); liefert die Kombination.
   validatePlay(playerIdx, cards) {
     if (this.over) throw new Error('Runde ist bereits beendet');

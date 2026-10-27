@@ -50,6 +50,7 @@
 
   .actionbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
   .actionbar .spacer { flex: 1; }
+  .pcard.dim { opacity: .3; filter: grayscale(1); cursor: not-allowed; }
   .wish-chip { font-size: 0.8rem; background: #141414; border: 1px solid var(--border); border-radius: 999px; padding: 5px 12px; }
 
   .targets { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
@@ -180,9 +181,9 @@ function seatLabel(seatIndex) {
   const name = initialDeal && initialDeal.displayNames && initialDeal.displayNames[seatIndex];
   return name || SEAT_LABELS[seatIndex];
 }
-function cardEl(card, { selected = false, assigned = false, small = false, onClick = null } = {}) {
+function cardEl(card, { selected = false, assigned = false, small = false, dim = false, onClick = null } = {}) {
   const div = document.createElement('div');
-  div.className = 'pcard' + (card.special ? ' special' : '') + (small ? ' small' : '') + (selected ? ' selected' : '') + (assigned ? ' assigned' : '') + (onClick ? ' clickable' : '');
+  div.className = 'pcard' + (card.special ? ' special' : '') + (small ? ' small' : '') + (selected ? ' selected' : '') + (assigned ? ' assigned' : '') + (dim ? ' dim' : '') + (onClick ? ' clickable' : '');
   const label = labelFor(card);
   const icon = card.special ? SPECIAL_ICON[card.special] : SUIT_ICON[card.suit];
   const color = card.special ? AMBER : icon.color;
@@ -722,6 +723,15 @@ function renderSchupfenSummary() {
   return box;
 }
 
+// Muss ich den Wunsch erfüllen? Dann: welche Karten sind überhaupt spielbar (Rest wird ausgegraut).
+let forcedCache = { key: '', val: null };
+function forcedWishCards() {
+  if (round.pendingWish == null || round.turn !== mySeat || round.pendingDragonGiveaway) return null;
+  const key = [round.pendingWish, round.hands[mySeat].map((c) => c.id).join('.'), (round.currentTrick.cardsInTrick || []).map((c) => c.id).join('.')].join('|');
+  if (forcedCache.key !== key) forcedCache = { key, val: round.wishAllowedCardIds(mySeat) };
+  return forcedCache.val;
+}
+
 function renderPlaying() {
   const wrap = document.createElement('div');
 
@@ -805,10 +815,15 @@ function renderPlaying() {
   // werden (siehe engine/game.js: Round.play() erlaubt das explizit). Ob eine Auswahl tatsächlich
   // spielbar ist, entscheidet der "Karten spielen"-Button unten.
   const canSelect = !round.pendingDragonGiveaway;
+  // Muss der Wunsch erfüllt werden, sind nur die dafür möglichen Karten wählbar, der Rest ist grau.
+  const forcedAllowed = forcedWishCards();
+  if (forcedAllowed) for (const id of [...selected]) if (!forcedAllowed.has(id)) selected.delete(id);
   for (const c of sortHand(round.hands[mySeat])) {
+    const dim = !!forcedAllowed && !forcedAllowed.has(c.id);
     row.appendChild(cardEl(c, {
       selected: selected.has(c.id),
-      onClick: canSelect ? () => { selected.has(c.id) ? selected.delete(c.id) : selected.add(c.id); render(); } : null,
+      dim,
+      onClick: canSelect && !dim ? () => { selected.has(c.id) ? selected.delete(c.id) : selected.add(c.id); render(); } : null,
     }));
   }
   handZone.appendChild(row);
@@ -860,7 +875,7 @@ function renderPlaying() {
   if (round.pendingWish != null) {
     const chip = document.createElement('span');
     chip.className = 'wish-chip';
-    const forced = round.turn === mySeat && !round.pendingDragonGiveaway && round.wishPendingFulfillable(mySeat);
+    const forced = !!forcedAllowed;
     chip.textContent = forced ? `Wunsch: ${round.pendingWish} - du musst ihn spielen!` : `Wunsch: ${round.pendingWish}`;
     if (forced) chip.style.cssText = 'border-color:var(--accent);color:#ffb27a;font-weight:700';
     bar.appendChild(chip);
