@@ -343,10 +343,31 @@ test('Wunsch erzwingen: wer den Rang spielen kann, darf keine andere Karte legen
   assert.equal(round.pendingWish, null);
 });
 
-test('Wunsch erzwingen: kann die Wunschkarte den Tisch nicht schlagen, ist man frei', () => {
+test('Wunsch erzwingen: kann die Wunschkarte den Tisch nicht schlagen, ist man frei (der Wunsch verfällt dann durch die höhere Karte)', () => {
   const round = forcedWishRound([card('Jade', 7), card('Pagode', 14)], [card('Stern', 13)], 7);
-  round.play(0, [card('Pagode', 14)]);
-  assert.equal(round.pendingWish, 7); // Wunsch bleibt bestehen
+  assert.equal(round.wishAllowedCardIds(0), null); // keine Pflicht
+  round.play(0, [card('Pagode', 14)]); // As ist höher als der Wunsch 7
+  assert.equal(round.pendingWish, null);
+});
+
+test('Wunsch verfällt: niedrigere Karte lässt ihn bestehen, gleiche erfüllt, höhere beendet ihn', () => {
+  const play = (hand, onTable, cards) => { const r = forcedWishRound(hand.concat([card('Pagode', 11)]), onTable, 4); r.play(0, cards); return r.pendingWish; };
+  assert.equal(play([card('Jade', 2)], null, [card('Jade', 2)]), 4); // 2 < 4: bleibt (Anspiel ohne 4 auf der Hand)
+  assert.equal(play([card('Jade', 3)], [card('Stern', 2)], [card('Jade', 3)]), 4);
+  assert.equal(play([card('Jade', 5)], [card('Stern', 2)], [card('Jade', 5)]), null); // 5 > 4: verfallen
+  assert.equal(play([card('Jade', 4)], [card('Stern', 2)], [card('Jade', 4)]), null); // 4 gespielt: erfüllt
+  assert.equal(play([special('DRAGON')], [card('Stern', 2)], [special('DRAGON')]), null);
+  assert.equal(play([card('Jade', 9), card('Schwert', 9)], [card('Stern', 5), card('Pagode', 5)], [card('Jade', 9), card('Schwert', 9)]), null); // Paar 9
+  assert.equal(play([card('Jade', 3), card('Schwert', 3)], [card('Stern', 2), card('Pagode', 2)], [card('Jade', 3), card('Schwert', 3)]), 4); // Paar 3 < 4
+});
+
+test('Wunsch verfällt: Phönix auf eine höhere Karte beendet ihn, auf eine niedrigere nicht; Hund und Bombe', () => {
+  const run = (cards, onTable, wish, hand) => { const r = forcedWishRound(hand || cards, onTable, wish); r.play(0, cards); return r.pendingWish; };
+  assert.equal(run([special('PHOENIX')], [card('Stern', 9)], 4, [special('PHOENIX'), card('Jade', 2)]), null); // 9,5 > 4
+  assert.equal(run([special('PHOENIX')], [card('Stern', 2)], 4, [special('PHOENIX'), card('Jade', 2)]), 4); // 2,5 < 4
+  const four2 = [card('Jade', 2), card('Schwert', 2), card('Pagode', 2), card('Stern', 2)];
+  assert.equal(run(four2, [card('Stern', 3)], 4, four2.concat([card('Jade', 8)])), null); // Bombe beendet den Wunsch
+  assert.equal(run([special('DOG')], null, 4, [special('DOG'), card('Jade', 2)]), 4); // Hund zählt nie
 });
 
 test('Wunsch erzwingen: auch beim Anspielen, selbst der Hund ist dann verboten', () => {

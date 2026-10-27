@@ -185,6 +185,15 @@ export class Round {
     return allowed;
   }
 
+  // Ist diese Kombination "höher" als der gewünschte Rang? (Bomben, Drache, Phönix auf höheren
+  // Karten, Paare/Straßen/... mit höherem Rang.) Der Hund zählt nie.
+  exceedsWish(combo, current, wish) {
+    if (combo.isBomb) return true;
+    if (combo.type === COMBO.DOG) return false;
+    const value = combo.type === COMBO.SINGLE ? resolveSingleValue(combo, current) : combo.rank;
+    return value > wish;
+  }
+
   // Prüft einen Zug, ohne etwas zu verändern (wirft bei Regelverstoß); liefert die Kombination.
   validatePlay(playerIdx, cards) {
     if (this.over) throw new Error('Runde ist bereits beendet');
@@ -223,11 +232,11 @@ export class Round {
       this.pendingWish = wish ?? null;
       // Steckt der gewünschte Rang schon in dieser Straße, ist der Wunsch damit erfüllt.
       if (this.pendingWish != null && cards.some((c) => c.rank === this.pendingWish)) this.pendingWish = null;
-    } else if (this.pendingWish != null && current !== null) {
-      // Wunsch bleibt bestehen, bis eine Karte des gewünschten Rangs gespielt wurde
-      if (cards.some((c) => c.rank === this.pendingWish)) this.pendingWish = null;
-    } else if (this.pendingWish != null && cards.some((c) => c.rank === this.pendingWish)) {
-      this.pendingWish = null;
+    } else if (this.pendingWish != null) {
+      // Der Wunsch endet, sobald der gewünschte Rang gespielt wird - oder (Hausregel) sobald jemand
+      // etwas Höheres als den Wunschrang legt: dann ist er für die ganze Runde erledigt.
+      const wish = this.pendingWish;
+      if (cards.some((c) => c.rank === wish && !c.special) || this.exceedsWish(combo, current, wish)) this.pendingWish = null;
     }
 
     this.hands[playerIdx] = hand.filter((c) => !ids.has(c.id));
@@ -329,7 +338,7 @@ export class Round {
     const leader = this.active.has(winnerIdx) ? winnerIdx : this.nextActiveFrom(winnerIdx);
     this.currentTrick = { leaderIdx: leader, winnerIdx: null, combo: null, cardsInTrick: [], passesSinceLastPlay: 0 };
     this.turn = leader;
-    // pendingWish bleibt absichtlich über Stichgrenzen hinweg bestehen, bis er erfüllt wird
+    // pendingWish bleibt über Stichgrenzen hinweg bestehen, bis er erfüllt wird oder verfällt (siehe play())
   }
 
   checkRoundEnd() {
