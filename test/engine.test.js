@@ -283,6 +283,44 @@ test('Match endet, sobald ein Team die Zielpunktzahl erreicht', () => {
   assert.ok(match.winner() === 0 || match.winner() === 1 || match.winner() === null);
 });
 
+// ---- Wunsch (Mahjong) ----
+function wishRound(firstHand) {
+  const hands = [firstHand, [card('Jade', 9), card('Schwert', 6)], [card('Jade', 3)], [card('Jade', 4)]];
+  const round = new Round({ hands });
+  round.schupfenDone = true;
+  round.playedAny = [false, false, false, false];
+  round.turn = 0;
+  round.currentTrick = { leaderIdx: 0, winnerIdx: null, combo: null, cardsInTrick: [], passesSinceLastPlay: 0 };
+  return round;
+}
+const straight15 = () => [special('MAHJONG'), card('Jade', 2), card('Schwert', 3), card('Pagode', 4), card('Stern', 5)];
+
+test('Wunsch: Mahjong einzeln gespielt setzt den Wunsch', () => {
+  const round = wishRound([special('MAHJONG'), card('Jade', 8)]);
+  round.play(0, [special('MAHJONG')], { wish: 7 });
+  assert.equal(round.pendingWish, 7);
+});
+
+test('Wunsch: Mahjong in einer Straße darf ebenfalls wünschen', () => {
+  const round = wishRound(straight15().concat([card('Jade', 8)]));
+  round.play(0, straight15(), { wish: 9 });
+  assert.equal(round.pendingWish, 9);
+  assert.equal(round.currentTrick.combo.type, COMBO.STRAIGHT);
+});
+
+test('Wunsch: steckt der Rang in der eigenen Straße, ist er sofort erfüllt', () => {
+  const round = wishRound(straight15().concat([card('Jade', 8)]));
+  round.play(0, straight15(), { wish: 4 });
+  assert.equal(round.pendingWish, null);
+});
+
+test('Wunsch: ohne Angabe kein Wunsch, ungültiger Rang wird abgelehnt', () => {
+  const round = wishRound(straight15().concat([card('Jade', 8)]));
+  assert.throws(() => round.play(0, straight15(), { wish: 15 }), /Ungültiger Wunsch/);
+  round.play(0, straight15());
+  assert.equal(round.pendingWish, null);
+});
+
 console.log(`\n${passed} Tests bestanden.`);
 if (process.exitCode) {
   console.error('Es gab fehlgeschlagene Tests.');

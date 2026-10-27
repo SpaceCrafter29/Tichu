@@ -158,10 +158,13 @@ export class Round {
     if (!canBeat(combo, current)) throw new Error('Kombination schlägt den Tischstand nicht');
     this.turn = playerIdx; // bei einer Bombe außer der Reihe geht der Zug ab jetzt von hier weiter
 
-    if (combo.type === COMBO.SINGLE && cards[0].special === 'MAHJONG') {
+    if (cards.some((c) => c.special === 'MAHJONG')) {
+      // Der Wunsch gehört zum Ausspielen des Mahjong - egal ob einzeln oder in einer Straße.
       const wish = opts.wish;
       if (wish != null && (wish < 2 || wish > 14)) throw new Error('Ungültiger Wunsch');
       this.pendingWish = wish ?? null;
+      // Steckt der gewünschte Rang schon in dieser Straße, ist der Wunsch damit erfüllt.
+      if (this.pendingWish != null && cards.some((c) => c.rank === this.pendingWish)) this.pendingWish = null;
     } else if (this.pendingWish != null && current !== null) {
       // Wunsch bleibt bestehen, bis eine Karte des gewünschten Rangs gespielt wurde
       if (cards.some((c) => c.rank === this.pendingWish)) this.pendingWish = null;

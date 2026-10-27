@@ -301,6 +301,8 @@ let schupfenDraft = {}; // {toSeat: cardId}
 let schupfenPendingCardId = null; // gerade angetippte, noch nicht zugeordnete Karte
 let errorMsg = '';
 let playAgainClicked = false;
+let wishScroll = false; // einmalig zum Wunsch-Block scrollen, wenn er erscheint
+let wishPick = null; // Mahjong-Auswahl: Kartennummern, die gespielt werden, sobald der Wunsch gewählt ist
 let tournamentResultState = null; // null | 'saving' | 'saved' | 'failed' - Turnier: Ergebnis-Speicherung
 let tournamentResultAttempted = false; // verhindert wiederholte finishTournamentMatch()-Versuche
 // bei jedem Re-Render, sobald einmal (erfolgreich oder nicht) versucht wurde - ein doppelter
@@ -393,6 +395,7 @@ async function start() {
     errorMsg = '';
     playAgainClicked = false;
     syncTurnTimer();
+    if (wishPick && (round.turn !== mySeat || round.over)) wishPick = null;
     render();
     maybeAutoDeal();
   });
@@ -811,6 +814,47 @@ function renderPlaying() {
   handZone.appendChild(row);
   wrap.appendChild(handZone);
 
+  if (wishPick) {
+    const box = document.createElement('div');
+    box.className = 'panel';
+    box.style.cssText = 'margin:10px 0;border-color:var(--accent)';
+    box.dataset.wishbox = '1';
+    box.innerHTML = '<div class="sub" style="margin:0 0 8px"><b>Mahjong: Welchen Wunsch sagst du an?</b> Wer kann, muss diesen Rang spielen.</div>';
+    const wishRow = document.createElement('div');
+    wishRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px';
+    const playWith = (wish) => withError(async () => {
+      const ids = wishPick; wishPick = null;
+      const payload = { cardIds: ids };
+      if (wish != null) payload.wish = wish; // Firestore lehnt explizite undefined-Feldwerte ab
+      selected = new Set();
+      await postEvent(gameId, mySeat, 'play', payload);
+    });
+    const names = { 11: 'B', 12: 'D', 13: 'K', 14: 'A' };
+    for (let rank = 2; rank <= 14; rank++) {
+      const b = document.createElement('button');
+      b.dataset.wish = rank;
+      b.style.minWidth = '44px';
+      b.textContent = names[rank] || String(rank);
+      b.addEventListener('click', playWith(rank));
+      wishRow.appendChild(b);
+    }
+    const none = document.createElement('button');
+    none.className = 'secondary';
+    none.dataset.wish = 'none';
+    none.textContent = 'Kein Wunsch';
+    none.addEventListener('click', playWith(null));
+    wishRow.appendChild(none);
+    const cancel = document.createElement('button');
+    cancel.className = 'secondary';
+    cancel.textContent = 'Abbrechen';
+    cancel.addEventListener('click', () => { wishPick = null; render(); });
+    wishRow.appendChild(cancel);
+    box.appendChild(wishRow);
+    wrap.appendChild(box);
+    // Danach rendert withError() noch einmal neu - deshalb das Element erst dann suchen
+    if (wishScroll) { wishScroll = false; setTimeout(() => { const el = document.querySelector('[data-wishbox]'); if (el) el.scrollIntoView({ block: 'center' }); }, 50); }
+  }
+
   const bar = document.createElement('div');
   bar.className = 'actionbar';
   if (round.pendingWish != null) {
@@ -845,18 +889,11 @@ function renderPlaying() {
   playBtn.disabled = round.pendingDragonGiveaway || selected.size === 0 || (!myTurn && !isBombSelected);
   playBtn.addEventListener('click', withError(async () => {
     const cards = sortHand(round.hands[mySeat].filter((c) => selected.has(c.id)));
-    let wish;
-    const isMahjongLead = cards.length === 1 && cards[0].special === 'MAHJONG' && round.currentTrick.combo === null;
-    if (isMahjongLead) {
-      const input = window.prompt('Wunsch ansagen (2-14), leer lassen für keinen Wunsch:');
-      if (input && input.trim() !== '') {
-        const n = Number(input);
-        if (!Number.isNaN(n)) wish = n;
-      }
-    }
-    const payload = { cardIds: cards.map((c) => c.id) };
-    if (wish != null) payload.wish = wish; // Firestore lehnt explizite undefined-Feldwerte ab
-    await postEvent(gameId, mySeat, 'play', payload);
+    // Wer den Mahjong ausspielt (einzeln oder in einer Straße), darf einen Wunsch ansagen -
+    // die Auswahl erscheint direkt auf der Seite (kein Browser-Fenster, das blockiert werden kann).
+    const playsMahjong = cards.some((c) => c.special === 'MAHJONG') && round.currentTrick.combo === null && round.turn === mySeat;
+    if (playsMahjong && classify(cards)) { wishPick = cards.map((c) => c.id); wishScroll = true; render(); return; }
+    await postEvent(gameId, mySeat, 'play', { cardIds: cards.map((c) => c.id) });
     selected = new Set();
   }));
   bar.appendChild(playBtn);
