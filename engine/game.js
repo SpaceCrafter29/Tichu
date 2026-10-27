@@ -124,24 +124,41 @@ export class Round {
     }
   }
 
+  // Gibt es für `playerIdx` JETZT eine zulässige Kombination, die eine natürliche Karte des
+  // gewünschten Rangs enthält (auch in Paar/Drilling/Straße/Full House/Treppe, Phönix darf
+  // mitspielen) und den Tischstand schlägt? Dann muss der Wunsch erfüllt werden. Bomben zählen
+  // nicht als Pflicht - sie dürfen immer, aber niemand muss eine werfen.
   wishPendingFulfillable(playerIdx) {
     if (this.pendingWish == null) return false;
+    const wish = this.pendingWish;
     const hand = this.hands[playerIdx];
-    const wishCards = hand.filter((c) => c.rank === this.pendingWish && !c.special);
-    if (wishCards.length === 0) return false;
+    const isWishCard = (c) => c.rank === wish && !c.special;
+    if (!hand.some(isWishCard)) return false;
     const current = this.currentTrick.combo;
-    const candidates = [];
-    if (wishCards.length >= 1) candidates.push([wishCards[0]]);
-    if (wishCards.length >= 2) candidates.push(wishCards.slice(0, 2));
-    if (wishCards.length >= 3) candidates.push(wishCards.slice(0, 3));
-    if (wishCards.length >= 4) candidates.push(wishCards.slice(0, 4));
-    return candidates.some((cards) => {
-      const combo = classify(cards);
-      return combo && canBeat(combo, current);
-    });
+    if (current === null) return true; // beim Anspielen ist jede einzelne Karte des Rangs zulässig
+    if (current.type === COMBO.DOG) return false;
+    const n = current.length;
+    if (n > hand.length) return false;
+    const chosen = [];
+    const pick = (start, hasWish) => {
+      if (chosen.length === n) {
+        if (!hasWish) return false;
+        const combo = classify(chosen);
+        return !!combo && !combo.isBomb && canBeat(combo, current);
+      }
+      for (let i = start; i <= hand.length - (n - chosen.length); i++) {
+        chosen.push(hand[i]);
+        const found = pick(i + 1, hasWish || isWishCard(hand[i]));
+        chosen.pop();
+        if (found) return true;
+      }
+      return false;
+    };
+    return pick(0, false);
   }
 
-  play(playerIdx, cards, opts = {}) {
+  // Prüft einen Zug, ohne etwas zu verändern (wirft bei Regelverstoß); liefert die Kombination.
+  validatePlay(playerIdx, cards) {
     if (this.over) throw new Error('Runde ist bereits beendet');
     if (this.pendingDragonGiveaway) throw new Error('Drachenstich muss erst vergeben werden');
     const hand = this.hands[playerIdx];
@@ -154,8 +171,21 @@ export class Round {
     // Bomben dürfen jederzeit außer der Reihe geworfen werden, alles andere nur am eigenen Zug.
     const isBomb = combo.type === COMBO.BOMB_QUAD || combo.type === COMBO.BOMB_STRAIGHTFLUSH;
     if (this.turn !== playerIdx && !isBomb) throw new Error('Nicht am Zug');
+    if (!canBeat(combo, this.currentTrick.combo)) throw new Error('Kombination schlägt den Tischstand nicht');
+    // Wunsch: wer ihn erfüllen kann, muss eine Kombination mit dem Rang spielen (Bomben ausgenommen)
+    if (this.pendingWish != null && !isBomb && this.turn === playerIdx
+      && !cards.some((c) => c.rank === this.pendingWish && !c.special)
+      && this.wishPendingFulfillable(playerIdx)) {
+      throw new Error('Wunsch muss erfüllt werden, falls möglich');
+    }
+    return combo;
+  }
+
+  play(playerIdx, cards, opts = {}) {
+    const combo = this.validatePlay(playerIdx, cards);
+    const hand = this.hands[playerIdx];
+    const ids = new Set(cards.map((c) => c.id));
     const current = this.currentTrick.combo;
-    if (!canBeat(combo, current)) throw new Error('Kombination schlägt den Tischstand nicht');
     this.turn = playerIdx; // bei einer Bombe außer der Reihe geht der Zug ab jetzt von hier weiter
 
     if (cards.some((c) => c.special === 'MAHJONG')) {
@@ -206,12 +236,17 @@ export class Round {
     this.advanceTurn();
   }
 
-  pass(playerIdx) {
+  // Prüft das Passen, ohne etwas zu verändern (wirft bei Regelverstoß).
+  validatePass(playerIdx) {
     if (this.over) throw new Error('Runde ist bereits beendet');
     if (this.pendingDragonGiveaway) throw new Error('Drachenstich muss erst vergeben werden');
     if (this.turn !== playerIdx) throw new Error('Nicht am Zug');
     if (this.currentTrick.combo === null) throw new Error('Eröffnungsspieler kann nicht passen');
     if (this.wishPendingFulfillable(playerIdx)) throw new Error('Wunsch muss erfüllt werden, falls möglich');
+  }
+
+  pass(playerIdx) {
+    this.validatePass(playerIdx);
     this.currentTrick.passesSinceLastPlay++;
     const remainingOthers = [...this.active].filter((p) => p !== this.currentTrick.winnerIdx).length;
     if (this.currentTrick.passesSinceLastPlay >= remainingOthers) {

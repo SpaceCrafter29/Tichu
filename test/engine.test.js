@@ -321,6 +321,82 @@ test('Wunsch: ohne Angabe kein Wunsch, ungültiger Rang wird abgelehnt', () => {
   assert.equal(round.pendingWish, null);
 });
 
+// ---- Wunsch erzwingen ----
+// `me` (Spieler 0) ist am Zug, ein anderer hat `onTable` ausgespielt (null = Spieler 0 spielt an), Wunsch aktiv.
+function forcedWishRound(myHand, onTable, wish) {
+  const hands = [myHand, [card('Jade', 10), card('Schwert', 6)], [card('Jade', 3), card('Schwert', 12)], [card('Jade', 4), card('Schwert', 11)]];
+  const round = new Round({ hands });
+  round.schupfenDone = true;
+  round.playedAny = [true, true, true, true];
+  round.turn = 0;
+  round.pendingWish = wish;
+  const combo = onTable ? classify(onTable) : null;
+  round.currentTrick = { leaderIdx: 1, winnerIdx: onTable ? 1 : null, combo, cardsInTrick: onTable || [], passesSinceLastPlay: 0 };
+  return round;
+}
+
+test('Wunsch erzwingen: wer den Rang spielen kann, darf keine andere Karte legen', () => {
+  const round = forcedWishRound([card('Jade', 7), card('Schwert', 9), card('Pagode', 13)], [card('Stern', 5)], 7);
+  assert.throws(() => round.play(0, [card('Schwert', 9)]), /Wunsch muss erfüllt werden/);
+  assert.throws(() => round.pass(0), /Wunsch muss erfüllt werden/);
+  round.play(0, [card('Jade', 7)]);
+  assert.equal(round.pendingWish, null);
+});
+
+test('Wunsch erzwingen: kann die Wunschkarte den Tisch nicht schlagen, ist man frei', () => {
+  const round = forcedWishRound([card('Jade', 7), card('Pagode', 14)], [card('Stern', 13)], 7);
+  round.play(0, [card('Pagode', 14)]);
+  assert.equal(round.pendingWish, 7); // Wunsch bleibt bestehen
+});
+
+test('Wunsch erzwingen: auch beim Anspielen, selbst der Hund ist dann verboten', () => {
+  const lead = () => forcedWishRound([card('Jade', 7), card('Schwert', 3), special('DOG')], null, 7);
+  assert.throws(() => lead().play(0, [card('Schwert', 3)]), /Wunsch muss erfüllt werden/);
+  assert.throws(() => lead().play(0, [special('DOG')]), /Wunsch muss erfüllt werden/);
+  lead().play(0, [card('Jade', 7)]);
+});
+
+test('Wunsch erzwingen: Paar mit Phönix zählt, andere Paare sind dann verboten', () => {
+  const hand = [card('Jade', 7), special('PHOENIX'), card('Jade', 9), card('Schwert', 9)];
+  const onTable = [card('Stern', 5), card('Pagode', 5)];
+  assert.throws(() => forcedWishRound(hand, onTable, 7).play(0, [card('Jade', 9), card('Schwert', 9)]), /Wunsch muss erfüllt werden/);
+  forcedWishRound(hand, onTable, 7).play(0, [card('Jade', 7), special('PHOENIX')]);
+});
+
+test('Wunsch erzwingen: Straße mit dem Wunschrang ist Pflicht, andere Straße verboten', () => {
+  const hand = [4, 5, 6, 7, 8, 9].map((r, i) => card(['Jade', 'Schwert', 'Pagode', 'Stern'][i % 4], r));
+  const onTable = [3, 4, 5, 6, 7].map((r, i) => card(['Jade', 'Schwert', 'Pagode', 'Stern', 'Jade'][i], r));
+  const withFour = () => forcedWishRound(hand, onTable, 4);
+  assert.throws(() => withFour().play(0, hand.slice(1)), /Wunsch muss erfüllt werden/); // 5-9 ohne die 4
+  withFour().play(0, hand.slice(0, 5)); // 4-8 enthält die 4
+});
+
+test('Wunsch erzwingen: Bomben sind immer erlaubt und nie Pflicht', () => {
+  const quad = [card('Jade', 9), card('Schwert', 9), card('Pagode', 9), card('Stern', 9)];
+  const round = forcedWishRound([card('Jade', 7), ...quad], [card('Stern', 5)], 7);
+  round.play(0, quad); // Bombe statt Wunsch
+  const four7 = [card('Jade', 7), card('Schwert', 7), card('Pagode', 7), card('Stern', 7)];
+  // Gegen ein Paar erfüllt ein Paar des Wunschrangs (auch aus einem Vierling heraus)
+  const r2 = forcedWishRound([...four7, card('Jade', 2)], [card('Stern', 5), card('Pagode', 5)], 7);
+  r2.play(0, [card('Jade', 7), card('Schwert', 7)]);
+});
+
+test('Wunsch erzwingen: außer der Reihe geworfene Bombe wird nicht durch den Wunsch behindert', () => {
+  const quad = [card('Jade', 9), card('Schwert', 9), card('Pagode', 9), card('Stern', 9)];
+  const round = forcedWishRound([card('Jade', 7), ...quad], [card('Stern', 5)], 7);
+  round.turn = 2; // Spieler 0 ist nicht am Zug
+  round.play(0, quad);
+  assert.equal(round.currentTrick.winnerIdx, 0);
+});
+
+test('validatePlay/validatePass verändern nichts', () => {
+  const round = forcedWishRound([card('Jade', 7), card('Schwert', 9)], [card('Stern', 5)], 7);
+  assert.throws(() => round.validatePlay(0, [card('Schwert', 9)]), /Wunsch/);
+  assert.doesNotThrow(() => round.validatePlay(0, [card('Jade', 7)]));
+  assert.equal(round.hands[0].length, 2);
+  assert.equal(round.turn, 0);
+});
+
 console.log(`\n${passed} Tests bestanden.`);
 if (process.exitCode) {
   console.error('Es gab fehlgeschlagene Tests.');

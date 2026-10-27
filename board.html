@@ -860,7 +860,9 @@ function renderPlaying() {
   if (round.pendingWish != null) {
     const chip = document.createElement('span');
     chip.className = 'wish-chip';
-    chip.textContent = `Wunsch: ${round.pendingWish}`;
+    const forced = round.turn === mySeat && !round.pendingDragonGiveaway && round.wishPendingFulfillable(mySeat);
+    chip.textContent = forced ? `Wunsch: ${round.pendingWish} - du musst ihn spielen!` : `Wunsch: ${round.pendingWish}`;
+    if (forced) chip.style.cssText = 'border-color:var(--accent);color:#ffb27a;font-weight:700';
     bar.appendChild(chip);
   }
 
@@ -881,7 +883,10 @@ function renderPlaying() {
   passBtn.className = 'secondary';
   passBtn.textContent = 'Passen';
   passBtn.disabled = !myTurn || round.currentTrick.combo === null;
-  passBtn.addEventListener('click', withError(async () => { await postEvent(gameId, mySeat, 'pass', {}); }));
+  passBtn.addEventListener('click', withError(async () => {
+    round.validatePass(mySeat); // z. B. "Wunsch muss erfüllt werden" sichtbar melden statt still zu ignorieren
+    await postEvent(gameId, mySeat, 'pass', {});
+  }));
   bar.appendChild(passBtn);
 
   const playBtn = document.createElement('button');
@@ -891,6 +896,7 @@ function renderPlaying() {
     const cards = sortHand(round.hands[mySeat].filter((c) => selected.has(c.id)));
     // Wer den Mahjong ausspielt (einzeln oder in einer Straße), darf einen Wunsch ansagen -
     // die Auswahl erscheint direkt auf der Seite (kein Browser-Fenster, das blockiert werden kann).
+    round.validatePlay(mySeat, cards); // wirft bei Regelverstoß; withError() zeigt die Meldung an
     const playsMahjong = cards.some((c) => c.special === 'MAHJONG') && round.currentTrick.combo === null && round.turn === mySeat;
     if (playsMahjong && classify(cards)) { wishPick = cards.map((c) => c.id); wishScroll = true; render(); return; }
     await postEvent(gameId, mySeat, 'play', { cardIds: cards.map((c) => c.id) });
