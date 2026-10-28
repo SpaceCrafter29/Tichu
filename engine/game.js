@@ -208,6 +208,9 @@ export class Round {
     // Bomben dürfen jederzeit außer der Reihe geworfen werden, alles andere nur am eigenen Zug.
     const isBomb = combo.type === COMBO.BOMB_QUAD || combo.type === COMBO.BOMB_STRAIGHTFLUSH;
     if (this.turn !== playerIdx && !isBomb) throw new Error('Nicht am Zug');
+    if (combo.type === COMBO.SINGLE && combo.isPhoenix && this.currentTrick.combo && isDragonSingle(this.currentTrick.combo)) {
+      throw new Error('Der Phönix kann den Drachen nicht schlagen');
+    }
     if (!canBeat(combo, this.currentTrick.combo)) throw new Error('Kombination schlägt den Tischstand nicht');
     // Wunsch: wer ihn erfüllen kann, muss eine Kombination mit dem Rang spielen (Bomben ausgenommen)
     if (this.pendingWish != null && !isBomb && this.turn === playerIdx
@@ -239,7 +242,10 @@ export class Round {
 
     this.hands[playerIdx] = hand.filter((c) => !ids.has(c.id));
     this.playedAny[playerIdx] = true;
-    this.currentTrick.combo = combo;
+    // Ein einzelner Phönix gilt auf dem Tisch weiter als Vorgänger + 0,5 (König + Phönix: nur Ass/Drache schlagen ihn).
+    this.currentTrick.combo = combo.type === COMBO.SINGLE && combo.isPhoenix
+      ? { ...combo, rank: resolveSingleValue(combo, current) }
+      : combo;
     this.currentTrick.winnerIdx = playerIdx;
     this.currentTrick.cardsInTrick.push(...cards);
     this.currentTrick.passesSinceLastPlay = 0;

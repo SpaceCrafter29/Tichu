@@ -232,6 +232,7 @@ export function canBeat(candidate, current) {
   if (candidate.length !== current.length) return false;
 
   if (candidate.type === COMBO.SINGLE) {
+    if (candidate.isPhoenix && isDragonSingle(current)) return false; // der Phönix schlägt den Drachen nicht
     const candValue = resolveSingleValue(candidate, current);
     const curValue = resolveSingleValue(current, null);
     return candValue > curValue;
@@ -243,8 +244,8 @@ export function canBeat(candidate, current) {
 // `against` ist die Kombination, die geschlagen werden soll (oder null, wenn `combo` selbst der Tischstand ist).
 export function resolveSingleValue(combo, against) {
   if (combo.type !== COMBO.SINGLE) return combo.rank;
-  if (!combo.isPhoenix) return combo.rank;
-  if (against === null) return 1; // als Anspiel ist der Phönix nur 1 wert
+  if (!combo.isPhoenix || combo.rank != null) return combo.rank; // ein schon liegender Phönix trägt seinen Wert (siehe Round.play)
+  if (against === null) return 1.5; // als Anspiel ist der Phönix 1,5 wert
   return resolveSingleValue(against, null) + 0.5;
 }
 

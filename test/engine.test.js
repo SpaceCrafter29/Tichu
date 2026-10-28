@@ -104,14 +104,15 @@ test('Bomben erkannt: Vierling und Straßenbombe', () => {
 });
 
 // ---- Vergleich / canBeat ----
-test('Drache schlägt alle normalen Singles, Phönix schlägt den Drachen', () => {
+test('Drache schlägt alle normalen Singles, der Phönix schlägt den Drachen nicht', () => {
   const dragon = classify([special('DRAGON')]);
   const king = classify([card('Jade', 13)]);
   assert.equal(canBeat(dragon, king), true);
   assert.equal(canBeat(king, dragon), false);
 
   const phoenix = classify([special('PHOENIX')]);
-  assert.equal(canBeat(phoenix, dragon), true);
+  assert.equal(canBeat(phoenix, dragon), false);
+  assert.equal(canBeat(phoenix, king), true); // auf allem anderen schon
 });
 
 test('Bombe schlägt jede Nicht-Bombe unabhängig vom Typ', () => {
@@ -436,6 +437,43 @@ test('validatePlay/validatePass verändern nichts', () => {
   assert.doesNotThrow(() => round.validatePlay(0, [card('Jade', 7)]));
   assert.equal(round.hands[0].length, 2);
   assert.equal(round.turn, 0);
+});
+
+test('Phönix auf den Drachen: Round meldet es ausdrücklich, nichts verändert sich', () => {
+  const round = forcedWishRound([special('PHOENIX'), card('Jade', 2)], [special('DRAGON')], null);
+  assert.throws(() => round.validatePlay(0, [special('PHOENIX')]), /Phönix kann den Drachen nicht schlagen/);
+  assert.throws(() => round.play(0, [special('PHOENIX')]), /Phönix kann den Drachen nicht schlagen/);
+  assert.equal(round.hands[0].length, 2);
+  assert.equal(round.currentTrick.winnerIdx, 1);
+});
+
+test('Liegender Phönix zählt Vorgänger + 0,5: auf einem König schlagen ihn nur Ass und Drache', () => {
+  const phoenixOnKing = () => {
+    const round = forcedWishRound([special('PHOENIX'), card('Jade', 2)], [card('Stern', 13)], null);
+    round.play(0, [special('PHOENIX')]);
+    assert.equal(round.currentTrick.combo.rank, 13.5);
+    return round;
+  };
+  const challenge = (cards) => {
+    const round = phoenixOnKing();
+    round.turn = 1;
+    round.hands[1] = cards.concat([card('Jade', 5)]);
+    return round;
+  };
+  assert.throws(() => challenge([card('Pagode', 2)]).validatePlay(1, [card('Pagode', 2)]), /schlägt den Tischstand nicht/);
+  assert.throws(() => challenge([card('Pagode', 11)]).validatePlay(1, [card('Pagode', 11)]), /schlägt den Tischstand nicht/);
+  assert.throws(() => challenge([card('Pagode', 13)]).validatePlay(1, [card('Pagode', 13)]), /schlägt den Tischstand nicht/); // ein König ist kleiner als König + 0,5
+  challenge([card('Pagode', 14)]).validatePlay(1, [card('Pagode', 14)]);
+  challenge([special('DRAGON')]).validatePlay(1, [special('DRAGON')]);
+});
+
+test('Phönix als Anspiel ist 1,5: schon eine 2 schlägt ihn', () => {
+  const round = forcedWishRound([special('PHOENIX'), card('Jade', 8)], null, null);
+  round.currentTrick = { leaderIdx: 0, winnerIdx: null, combo: null, cardsInTrick: [], passesSinceLastPlay: 0 };
+  round.play(0, [special('PHOENIX')]);
+  assert.equal(round.currentTrick.combo.rank, 1.5);
+  round.hands[1] = [card('Jade', 2), card('Jade', 9)];
+  round.validatePlay(1, [card('Jade', 2)]);
 });
 
 console.log(`\n${passed} Tests bestanden.`);
