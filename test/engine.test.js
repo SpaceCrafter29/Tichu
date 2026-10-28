@@ -301,23 +301,17 @@ test('Wunsch: Mahjong einzeln gespielt setzt den Wunsch', () => {
   assert.equal(round.pendingWish, 7);
 });
 
-test('Wunsch: Mahjong in einer Straße darf ebenfalls wünschen', () => {
+test('Wunsch: Mahjong in einer Straße setzt keinen Wunsch (auch wenn einer mitgegeben wird)', () => {
   const round = wishRound(straight15().concat([card('Jade', 8)]));
   round.play(0, straight15(), { wish: 9 });
-  assert.equal(round.pendingWish, 9);
+  assert.equal(round.pendingWish, null);
   assert.equal(round.currentTrick.combo.type, COMBO.STRAIGHT);
 });
 
-test('Wunsch: steckt der Rang in der eigenen Straße, ist er sofort erfüllt', () => {
-  const round = wishRound(straight15().concat([card('Jade', 8)]));
-  round.play(0, straight15(), { wish: 4 });
-  assert.equal(round.pendingWish, null);
-});
-
 test('Wunsch: ohne Angabe kein Wunsch, ungültiger Rang wird abgelehnt', () => {
-  const round = wishRound(straight15().concat([card('Jade', 8)]));
-  assert.throws(() => round.play(0, straight15(), { wish: 15 }), /Ungültiger Wunsch/);
-  round.play(0, straight15());
+  const round = wishRound([special('MAHJONG'), card('Jade', 8)]);
+  assert.throws(() => round.play(0, [special('MAHJONG')], { wish: 15 }), /Ungültiger Wunsch/);
+  round.play(0, [special('MAHJONG')]);
   assert.equal(round.pendingWish, null);
 });
 

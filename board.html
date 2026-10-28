@@ -303,6 +303,7 @@ let schupfenPendingCardId = null; // gerade angetippte, noch nicht zugeordnete K
 let errorMsg = '';
 let playAgainClicked = false;
 let wishScroll = false; // einmalig zum Wunsch-Block scrollen, wenn er erscheint
+let wishChoice = null; // gewählter Rang, 'none' (kein Wunsch) oder null, solange noch nichts gewählt ist
 let wishPick = null; // Mahjong-Auswahl: Kartennummern, die gespielt werden, sobald der Wunsch gewählt ist
 let tournamentResultState = null; // null | 'saving' | 'saved' | 'failed' - Turnier: Ergebnis-Speicherung
 let tournamentResultAttempted = false; // verhindert wiederholte finishTournamentMatch()-Versuche
@@ -396,7 +397,7 @@ async function start() {
     errorMsg = '';
     playAgainClicked = false;
     syncTurnTimer();
-    if (wishPick && (round.turn !== mySeat || round.over)) wishPick = null;
+    if (wishPick && (round.turn !== mySeat || round.over)) { wishPick = null; wishChoice = null; }
     render();
     maybeAutoDeal();
   });
@@ -791,7 +792,9 @@ function renderPlaying() {
   table.className = 'table-area';
   const label = document.createElement('div');
   label.className = 'trick-label';
-  if (round.currentTrick.combo === null) {
+  if (wishPick) {
+    label.textContent = 'Du legst den Mahjong - wähle deinen Wunsch und bestätige (die anderen sehen ihn erst danach)';
+  } else if (round.currentTrick.combo === null) {
     label.textContent = `${seatLabel(round.turn)} eröffnet den Stich`;
   } else {
     label.textContent = `Zuletzt: ${seatLabel(round.currentTrick.winnerIdx)} spielt ${comboLabel(round.currentTrick.combo)}`;
@@ -799,7 +802,9 @@ function renderPlaying() {
   table.appendChild(label);
   const trickCards = document.createElement('div');
   trickCards.className = 'trick-cards';
-  for (const c of round.currentTrick.cardsInTrick) trickCards.appendChild(cardEl(c, { small: true }));
+  // Während der Wunschwahl liegt der Mahjong nur bei dir auf dem Tisch (Vorschau), noch nicht gesendet.
+  const shownCards = wishPick ? round.hands[mySeat].filter((c) => wishPick.includes(c.id)) : round.currentTrick.cardsInTrick;
+  for (const c of shownCards) trickCards.appendChild(cardEl(c, { small: true }));
   table.appendChild(trickCards);
   wrap.appendChild(table);
 
@@ -819,6 +824,7 @@ function renderPlaying() {
   const forcedAllowed = forcedWishCards();
   if (forcedAllowed) for (const id of [...selected]) if (!forcedAllowed.has(id)) selected.delete(id);
   for (const c of sortHand(round.hands[mySeat])) {
+    if (wishPick && wishPick.includes(c.id)) continue; // liegt als Vorschau auf dem Tisch
     const dim = !!forcedAllowed && !forcedAllowed.has(c.id);
     row.appendChild(cardEl(c, {
       selected: selected.has(c.id),
@@ -830,41 +836,53 @@ function renderPlaying() {
   wrap.appendChild(handZone);
 
   if (wishPick) {
+    const names = { 11: 'B', 12: 'D', 13: 'K', 14: 'A' };
+    const label = (rank) => names[rank] || String(rank);
     const box = document.createElement('div');
     box.className = 'panel';
     box.style.cssText = 'margin:10px 0;border-color:var(--accent)';
     box.dataset.wishbox = '1';
-    box.innerHTML = '<div class="sub" style="margin:0 0 8px"><b>Mahjong: Welchen Wunsch sagst du an?</b> Wer kann, muss diesen Rang spielen.</div>';
+    box.innerHTML = '<div class="sub" style="margin:0 0 8px"><b>Mahjong: Welchen Wunsch sagst du an?</b> Wer kann, muss diesen Rang spielen. Erst nach deiner Bestätigung sehen die anderen den Mahjong.</div>';
     const wishRow = document.createElement('div');
     wishRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px';
-    const playWith = (wish) => withError(async () => {
-      const ids = wishPick; wishPick = null;
-      const payload = { cardIds: ids };
-      if (wish != null) payload.wish = wish; // Firestore lehnt explizite undefined-Feldwerte ab
-      selected = new Set();
-      await postEvent(gameId, mySeat, 'play', payload);
-    });
-    const names = { 11: 'B', 12: 'D', 13: 'K', 14: 'A' };
+    const chooser = (value) => () => { wishChoice = value; render(); };
     for (let rank = 2; rank <= 14; rank++) {
       const b = document.createElement('button');
       b.dataset.wish = rank;
       b.style.minWidth = '44px';
-      b.textContent = names[rank] || String(rank);
-      b.addEventListener('click', playWith(rank));
+      if (wishChoice !== rank) b.className = 'secondary';
+      b.textContent = label(rank);
+      b.addEventListener('click', chooser(rank));
       wishRow.appendChild(b);
     }
     const none = document.createElement('button');
-    none.className = 'secondary';
     none.dataset.wish = 'none';
+    if (wishChoice !== 'none') none.className = 'secondary';
     none.textContent = 'Kein Wunsch';
-    none.addEventListener('click', playWith(null));
+    none.addEventListener('click', chooser('none'));
     wishRow.appendChild(none);
+    box.appendChild(wishRow);
+    const actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center';
+    const confirm = document.createElement('button');
+    confirm.dataset.confirmWish = '1';
+    confirm.disabled = wishChoice == null;
+    confirm.textContent = wishChoice == null ? 'Bestätigen' : (wishChoice === 'none' ? 'Bestätigen: kein Wunsch' : `Bestätigen: Wunsch ${label(wishChoice)}`);
+    confirm.addEventListener('click', withError(async () => {
+      const ids = wishPick, choice = wishChoice;
+      wishPick = null; wishChoice = null;
+      const payload = { cardIds: ids };
+      if (choice !== 'none') payload.wish = choice; // Firestore lehnt explizite undefined-Feldwerte ab
+      selected = new Set();
+      await postEvent(gameId, mySeat, 'play', payload);
+    }));
+    actions.appendChild(confirm);
     const cancel = document.createElement('button');
     cancel.className = 'secondary';
     cancel.textContent = 'Abbrechen';
-    cancel.addEventListener('click', () => { wishPick = null; render(); });
-    wishRow.appendChild(cancel);
-    box.appendChild(wishRow);
+    cancel.addEventListener('click', () => { wishPick = null; wishChoice = null; render(); });
+    actions.appendChild(cancel);
+    box.appendChild(actions);
     wrap.appendChild(box);
     // Danach rendert withError() noch einmal neu - deshalb das Element erst dann suchen
     if (wishScroll) { wishScroll = false; setTimeout(() => { const el = document.querySelector('[data-wishbox]'); if (el) el.scrollIntoView({ block: 'center' }); }, 50); }
@@ -897,7 +915,7 @@ function renderPlaying() {
   const passBtn = document.createElement('button');
   passBtn.className = 'secondary';
   passBtn.textContent = 'Passen';
-  passBtn.disabled = !myTurn || round.currentTrick.combo === null;
+  passBtn.disabled = !!wishPick || !myTurn || round.currentTrick.combo === null;
   passBtn.addEventListener('click', withError(async () => {
     round.validatePass(mySeat); // z. B. "Wunsch muss erfüllt werden" sichtbar melden statt still zu ignorieren
     await postEvent(gameId, mySeat, 'pass', {});
@@ -906,14 +924,14 @@ function renderPlaying() {
 
   const playBtn = document.createElement('button');
   playBtn.textContent = 'Karten spielen';
-  playBtn.disabled = round.pendingDragonGiveaway || selected.size === 0 || (!myTurn && !isBombSelected);
+  playBtn.disabled = !!wishPick || round.pendingDragonGiveaway || selected.size === 0 || (!myTurn && !isBombSelected);
   playBtn.addEventListener('click', withError(async () => {
     const cards = sortHand(round.hands[mySeat].filter((c) => selected.has(c.id)));
-    // Wer den Mahjong ausspielt (einzeln oder in einer Straße), darf einen Wunsch ansagen -
+    // Wer den Mahjong einzeln ausspielt, sagt einen Wunsch an (in einer Straße wird nicht gefragt) -
     // die Auswahl erscheint direkt auf der Seite (kein Browser-Fenster, das blockiert werden kann).
     round.validatePlay(mySeat, cards); // wirft bei Regelverstoß; withError() zeigt die Meldung an
-    const playsMahjong = cards.some((c) => c.special === 'MAHJONG') && round.currentTrick.combo === null && round.turn === mySeat;
-    if (playsMahjong && classify(cards)) { wishPick = cards.map((c) => c.id); wishScroll = true; render(); return; }
+    const playsMahjong = cards.length === 1 && cards[0].special === 'MAHJONG' && round.currentTrick.combo === null && round.turn === mySeat;
+    if (playsMahjong && classify(cards)) { wishPick = cards.map((c) => c.id); wishChoice = null; wishScroll = true; render(); return; }
     await postEvent(gameId, mySeat, 'play', { cardIds: cards.map((c) => c.id) });
     selected = new Set();
   }));

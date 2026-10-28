@@ -225,13 +225,11 @@ export class Round {
     const current = this.currentTrick.combo;
     this.turn = playerIdx; // bei einer Bombe außer der Reihe geht der Zug ab jetzt von hier weiter
 
-    if (cards.some((c) => c.special === 'MAHJONG')) {
-      // Der Wunsch gehört zum Ausspielen des Mahjong - egal ob einzeln oder in einer Straße.
+    if (combo.type === COMBO.SINGLE && cards[0].special === 'MAHJONG') {
+      // Gewünscht wird nur, wenn der Mahjong einzeln gespielt wird (nicht in einer Straße).
       const wish = opts.wish;
       if (wish != null && (wish < 2 || wish > 14)) throw new Error('Ungültiger Wunsch');
       this.pendingWish = wish ?? null;
-      // Steckt der gewünschte Rang schon in dieser Straße, ist der Wunsch damit erfüllt.
-      if (this.pendingWish != null && cards.some((c) => c.rank === this.pendingWish)) this.pendingWish = null;
     } else if (this.pendingWish != null) {
       // Der Wunsch endet, sobald der gewünschte Rang gespielt wird - oder (Hausregel) sobald jemand
       // etwas Höheres als den Wunschrang legt: dann ist er für die ganze Runde erledigt.
