@@ -384,7 +384,7 @@ function withError(fn) {
 async function start() {
   initialDeal = await getAllHands(gameId).catch((e) => { fatal('Konnte Hände nicht laden: ' + e.message); return null; });
   if (!initialDeal) return;
-  watchEvents(gameId, (all) => {
+  watchEvents(gameId, (all, fromCache) => {
     // Das events-Log eines wiederverwendeten Tisches kann noch Ereignisse der VORHERIGEN Partie
     // enthalten (das Aufräumen beim Verlassen klappt nicht immer, siehe clearEvents() in lobby.js).
     // Die würden auf den neuen Deal angewendet: Große-Tichu-Phase übersprungen, fremdes Tichu schon
@@ -408,7 +408,9 @@ async function start() {
     syncTurnTimer();
     if (wishPick && (round.turn !== mySeat || round.over)) { wishPick = null; wishChoice = null; }
     render();
-    maybeAutoDeal();
+    // Nur auf einem vom Server bestätigten Stand handeln: der lokale Speicher kann direkt nach dem
+    // Laden noch hinter dem echten Log zurückliegen (dann würde evtl. eine Runde doppelt ausgeteilt).
+    if (!fromCache) maybeAutoDeal();
   });
 }
 

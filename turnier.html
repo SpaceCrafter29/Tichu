@@ -226,7 +226,7 @@ const A = {
   },
   logout: async () => {
     await tournamentLogout().catch(() => {});
-    user = null; isAdmin = false; me = null; loginU = ''; loginP = ''; render();
+    window.location.reload(); // frisch laden: leert dabei auch den lokalen Speicher des abgemeldeten Kontos
   },
   tab: (k) => { tab = k; window.scrollTo(0, 0); render(); },
 
