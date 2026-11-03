@@ -88,6 +88,7 @@ import { finishTournamentMatch } from './lib/tournament.js';
 import { Round, teamOf } from './engine/game.js';
 import { sortHand, cardPoints, createDeck } from './engine/cards.js';
 import { classify, canBeat } from './engine/combos.js';
+import { newSecret, commitHash, emptyDeal, applyDealEvent, dealComplete, dealFromReveals } from './engine/fairdeal.js';
 
 // --- Auth/Setup ------------------------------------------------------------
 const errorEl = document.getElementById('error');
@@ -235,28 +236,50 @@ function comboLabel(combo) {
 // zwei Leute klicken gleichzeitig "Nochmal spielen") wird sonst ignoriert.
 // startScore: Punktestand, mit dem der Tisch beginnt (z. B. nach einem Reset durch die Admin, die den
 // Stand vor dem Reset beibehält - siehe adminResetTable() in lib/tournament.js).
-function replay(first8, rest6, legacy, events, startScore) {
-  let round = legacy ? new Round({ hands: first8 }) : new Round({ first8, rest6 });
+// `fair`: faires Austeilen (siehe engine/fairdeal.js): Hände und alle Folgerunden kommen aus den vier
+// Beiträgen (`dealCommit`/`dealReveal`) statt von einem einzelnen Austeiler; private Sitz-Dokumente und
+// `newRound`-Ereignisse werden dann ignoriert. Vor dem ersten Austeilen gibt es noch keine Runde (round = null).
+function replay(first8, rest6, legacy, events, startScore, fair = false, gid = null) {
+  let round = fair ? null : (legacy ? new Round({ hands: first8 }) : new Round({ first8, rest6 }));
   let matchScore = Array.isArray(startScore) ? [Number(startScore[0]) || 0, Number(startScore[1]) || 0] : [0, 0];
   let schupfenSubs = {};
   let roundsCompleted = 0; // für die "Best of N Runden"-Siegbedingung, siehe renderRoundOver()
-  for (const ev of events) {
+  let slot = 0; // die wievielte Austeilung als Nächstes ansteht (0 = erste Runde)
+  let deal = emptyDeal();
+  let roundStartIdx = 0; // Index des Ereignisses, das die aktuelle Runde ausgeteilt hat (für "bereit"-Zählung)
+  events.forEach((ev, idx) => {
     try {
+      if (fair && (ev.type === 'dealCommit' || ev.type === 'dealReveal')) {
+        if (round && !round.over) return; // nur zwischen den Runden
+        if (applyDealEvent(deal, ev, gid, slot) && ev.type === 'dealReveal' && dealComplete(deal)) {
+          if (round) {
+            matchScore = [matchScore[0] + round.result.teamScore[0], matchScore[1] + round.result.teamScore[1]];
+            roundsCompleted++;
+          }
+          round = new Round(dealFromReveals(gid, slot, deal));
+          schupfenSubs = {};
+          slot++;
+          deal = emptyDeal();
+          roundStartIdx = idx + 1;
+        }
+        return;
+      }
       if (ev.type === 'newRound') {
-        if (!round.over) continue;
+        if (fair || !round.over) return;
         matchScore = [matchScore[0] + round.result.teamScore[0], matchScore[1] + round.result.teamScore[1]];
         roundsCompleted++;
         round = new Round({ first8: seatMapToArr(ev.payload.first8), rest6: seatMapToArr(ev.payload.rest6) });
         schupfenSubs = {};
-        continue;
+        return;
       }
+      if (!round) return; // fair: vor dem ersten Austeilen kann es keine Züge geben
       applyEvent(round, ev, schupfenSubs);
     } catch (e) {
       console.warn('Ereignis übersprungen:', ev, e.message);
     }
-  }
-  if (round.over) roundsCompleted++; // die gerade beendete (noch nicht per newRound abgelöste) Runde mitzählen
-  return { round, matchScore, schupfenSubs, roundsCompleted };
+  });
+  if (round && round.over) roundsCompleted++; // die gerade beendete (noch nicht abgelöste) Runde mitzählen
+  return { round, matchScore, schupfenSubs, roundsCompleted, deal: { slot, commits: deal.commits, reveals: deal.reveals }, roundStartIdx };
 }
 function applyEvent(round, ev, schupfenSubs) {
   const { seatIndex, type, payload } = ev;
@@ -320,6 +343,11 @@ let tournamentResultAttempted = false; // verhindert wiederholte finishTournamen
 // Schreibversuch würde ohnehin nur an der "result bereits gesetzt"-Regel scheitern, siehe
 // lib/tournament.js, soll aber nicht bei jedem Sekunden-Tick erneut angestoßen werden.
 let currentSchupfenSubs = {};
+let fairMode = false; // faires Austeilen aktiv (siehe replay())
+let dealInfo = null; // { slot, commits, reveals } der anstehenden Austeilung
+let roundStartIdx = 0;
+let commitPostedFor = -1;
+let revealPostedFor = -1;
 
 // --- Zugtimer: nur Anzeige, KEIN automatischer Zug und kein Kick ----------------------------
 // Jeder Client verfolgt lokal, wer gerade "dran" ist (Grand-Tichu-Entscheidung, Drachenstich-
@@ -393,6 +421,10 @@ function withError(fn) {
 async function start() {
   initialDeal = await getAllHands(gameId).catch((e) => { fatal('Konnte Hände nicht laden: ' + e.message); return null; });
   if (!initialDeal) return;
+  // Faires Austeilen: Tische mit fairDeal-Markierung immer (private Hände/newRound anderer werden dann
+  // ignoriert); sonst, wenn niemand Hände abgelegt hat (neuer Tisch). Alte, schon klassisch ausgeteilte
+  // Spiele laufen unverändert weiter.
+  fairMode = !!(gameMeta && gameMeta.fairDeal === true) || (!initialDeal.legacy && initialDeal.first8.every((h) => h.length === 0));
   watchEvents(gameId, (all, fromCache) => {
     // Das events-Log eines wiederverwendeten Tisches kann noch Ereignisse der VORHERIGEN Partie
     // enthalten (das Aufräumen beim Verlassen klappt nicht immer, siehe clearEvents() in lobby.js).
@@ -404,8 +436,10 @@ async function start() {
       ? all.filter((e) => !(e.createdAt && typeof e.createdAt.toMillis === 'function' && e.createdAt.toMillis() < dealStart))
       : all;
     events = evs;
-    const result = replay(initialDeal.first8, initialDeal.rest6, initialDeal.legacy, events, gameMeta && gameMeta.startScore);
+    const result = replay(initialDeal.first8, initialDeal.rest6, initialDeal.legacy, events, gameMeta && gameMeta.startScore, fairMode, gameId);
     round = result.round;
+    dealInfo = result.deal;
+    roundStartIdx = result.roundStartIdx;
     matchScore = result.matchScore;
     currentSchupfenSubs = result.schupfenSubs;
     roundsCompleted = result.roundsCompleted;
@@ -419,7 +453,7 @@ async function start() {
     render();
     // Nur auf einem vom Server bestätigten Stand handeln: der lokale Speicher kann direkt nach dem
     // Laden noch hinter dem echten Log zurückliegen (dann würde evtl. eine Runde doppelt ausgeteilt).
-    if (!fromCache) maybeAutoDeal();
+    if (!fromCache) { maybeAutoDeal(); maybeFairDeal(); }
   });
 }
 
@@ -468,7 +502,11 @@ function render() {
   errEl.innerHTML = errorMsg ? `<div class="error-banner">${errorMsg}</div>` : '';
   const app = document.getElementById('app');
   app.innerHTML = '';
-  if (!round) { app.innerHTML = '<p class="muted">Lade Spielstand…</p>'; return; }
+  if (!round) {
+    if (fairMode) { app.appendChild(renderDealing()); return; }
+    app.innerHTML = '<p class="muted">Lade Spielstand…</p>';
+    return;
+  }
   const timerBanner = renderTurnTimer();
   if (timerBanner) app.appendChild(timerBanner);
   const warn = renderTichuWarning();
@@ -499,7 +537,8 @@ function esc(t) { return String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 // doppeltes newRound-Ereignis wäre harmlos (replay() ignoriert es, solange die Runde nicht zu Ende ist).
 function readyInfo() {
   let start = 0;
-  for (let i = events.length - 1; i >= 0; i--) if (events[i].type === 'newRound') { start = i + 1; break; }
+  if (fairMode) start = roundStartIdx;
+  else for (let i = events.length - 1; i >= 0; i--) if (events[i].type === 'newRound') { start = i + 1; break; }
   const set = new Set();
   let last = null;
   for (const e of events.slice(start)) if (e.type === 'ready') { set.add(e.seatIndex); last = e.seatIndex; }
@@ -517,6 +556,7 @@ async function dealNextRound() {
   await postEvent(gameId, mySeat, 'newRound', { first8: seatArrToMap(first8), rest6: seatArrToMap(rest6) });
 }
 function maybeAutoDeal() {
+  if (fairMode) return; // faires Austeilen: siehe maybeFairDeal()
   if (!round || !round.over) { dealPosted = false; return; }
   if (!(gameMeta && gameMeta.mode === 'tournament') || matchOverNow() || dealPosted) return;
   const rs = readyInfo();
@@ -524,6 +564,88 @@ function maybeAutoDeal() {
     dealPosted = true;
     dealNextRound().catch((e) => { dealPosted = false; errorMsg = e.message || String(e); render(); });
   }
+}
+
+// --- Faires Austeilen (siehe engine/fairdeal.js) ------------------------------------------------
+// Jeder Spieler legt erst nur den Hash seines geheimen Zufallswerts fest (dealCommit); sind alle vier da,
+// deckt jeder seinen Wert auf (dealReveal). Aus allen vier Werten ergeben sich die Karten - niemand
+// allein bestimmt sie. Der Zufallswert liegt bis zum Aufdecken im Browser (localStorage), damit er ein
+// Neuladen überlebt.
+const memSecrets = {};
+const secretKey = (slot) => `tichu.dealSecret.${gameId}.${slot}`;
+function loadSecret(slot) {
+  try { const v = localStorage.getItem(secretKey(slot)); if (v) return v; } catch (e) { /* privater Modus */ }
+  return memSecrets[slot] || null;
+}
+function createSecret(slot) {
+  const existing = loadSecret(slot);
+  if (existing) return existing;
+  const v = newSecret();
+  memSecrets[slot] = v;
+  try {
+    // alte Werte dieses Spiels aufräumen
+    const prefix = `tichu.dealSecret.${gameId}.`;
+    for (let i = localStorage.length - 1; i >= 0; i--) { const k = localStorage.key(i); if (k && k.startsWith(prefix) && k !== secretKey(slot)) localStorage.removeItem(k); }
+    localStorage.setItem(secretKey(slot), v);
+  } catch (e) { /* bleibt im Arbeitsspeicher */ }
+  return v;
+}
+async function sendCommit(slot) {
+  const secret = createSecret(slot);
+  await postEvent(gameId, mySeat, 'dealCommit', { slot, c: commitHash(gameId, slot, mySeat, secret) });
+}
+function maybeFairDeal() {
+  if (!fairMode || !dealInfo) return;
+  if (round && !round.over) return;
+  const { slot, commits, reveals } = dealInfo;
+  const nCommits = Object.keys(commits).length;
+  const iCommitted = commits[mySeat] !== undefined;
+  const isTournament = !!(gameMeta && gameMeta.mode === 'tournament');
+  // 1) eigenen Beitrag festlegen: erste Runde sofort; danach im Turnier, sobald alle vier "bereit" sind,
+  //    im Free Play, sobald irgendwer "Nochmal spielen" gedrückt hat (sein Beitrag ist der erste)
+  let want;
+  if (!round) want = true;
+  else if (matchOverNow()) want = false;
+  else if (isTournament) want = readyInfo().set.size === 4;
+  else want = nCommits > 0;
+  if (want && !iCommitted && commitPostedFor !== slot) {
+    commitPostedFor = slot;
+    sendCommit(slot).catch((e) => { commitPostedFor = -1; errorMsg = e.message || String(e); render(); });
+  }
+  // 2) aufdecken, sobald alle vier festgelegt haben
+  if (nCommits === 4 && iCommitted && reveals[mySeat] === undefined && revealPostedFor !== slot) {
+    const secret = loadSecret(slot);
+    if (secret) {
+      revealPostedFor = slot;
+      postEvent(gameId, mySeat, 'dealReveal', { slot, s: secret })
+        .then(() => { delete memSecrets[slot]; try { localStorage.removeItem(secretKey(slot)); } catch (e) { /* egal */ } }) // jetzt öffentlich: nie wiederverwenden
+        .catch((e) => { revealPostedFor = -1; errorMsg = e.message || String(e); render(); });
+    }
+  }
+}
+// Hinweis, solange gemeinsam gemischt wird (wer fehlt noch?)
+function dealingNote(always = false) {
+  if (!fairMode || !dealInfo) return null;
+  const { commits, reveals } = dealInfo;
+  const nC = Object.keys(commits).length, nR = Object.keys(reveals).length;
+  if (nC === 0 && !always) return null;
+  const missing = (nC < 4 ? [0, 1, 2, 3].filter((i) => commits[i] === undefined) : [0, 1, 2, 3].filter((i) => reveals[i] === undefined));
+  const p = document.createElement('p');
+  p.className = 'error-banner';
+  p.style.background = '#1c2e3a';
+  p.style.borderColor = '#2563eb';
+  p.style.color = '#93c5fd';
+  p.textContent = `Karten werden fair gemischt - alle vier würfeln mit, niemand kann sie allein bestimmen. Festgelegt ${nC}/4, aufgedeckt ${nR}/4`
+    + (nR < 4 && missing.length ? ` · warte auf ${missing.map((i) => (i === mySeat ? 'dich' : seatLabel(i))).join(', ')}` : '') + '.';
+  return p;
+}
+function renderDealing() {
+  const wrap = document.createElement('div');
+  const h = document.createElement('h2');
+  h.textContent = 'Karten werden ausgeteilt';
+  wrap.appendChild(h);
+  wrap.appendChild(dealingNote(true));
+  return wrap;
 }
 
 // Link für Zuschauer (spectate.html): zeigt nur öffentliche Züge. Im Turnier funktioniert er
@@ -1052,25 +1174,37 @@ function renderRoundOver() {
     ready.disabled = iAmReady;
     ready.addEventListener('click', withError(async () => { await postEvent(gameId, mySeat, 'ready', {}); }));
     wrap.appendChild(ready);
-    if (rs.set.size === 4) {
+    if (rs.set.size === 4 && !(fairMode && dealInfo && dealInfo.commits[mySeat] !== undefined)) {
       const go = document.createElement('button');
       go.className = 'secondary';
       go.style.marginLeft = '8px';
       go.textContent = 'Jetzt austeilen';
-      go.addEventListener('click', withError(async () => { await dealNextRound(); }));
+      // fair: eigenen Beitrag (nochmal) senden - normalerweise passiert das automatisch
+      go.addEventListener('click', withError(async () => { if (fairMode) await sendCommit(dealInfo.slot); else await dealNextRound(); }));
       wrap.appendChild(go);
     }
+    const note = dealingNote();
+    if (note) wrap.appendChild(note);
   } else {
     const again = document.createElement('button');
-    again.textContent = playAgainClicked ? 'Nächste Runde startet…' : 'Nochmal spielen';
-    again.disabled = playAgainClicked;
+    const startedAlready = fairMode ? !!(dealInfo && dealInfo.commits[mySeat] !== undefined) : playAgainClicked;
+    again.textContent = startedAlready ? 'Nächste Runde startet…' : 'Nochmal spielen';
+    again.disabled = startedAlready;
     again.addEventListener('click', withError(async () => {
+      if (fairMode) {
+        // faires Austeilen: mein Beitrag ist der erste, die anderen steigen automatisch ein
+        commitPostedFor = dealInfo.slot;
+        await sendCommit(dealInfo.slot);
+        return;
+      }
       playAgainClicked = true;
       render();
       const { first8, rest6 } = dealFreshRound();
       await postEvent(gameId, mySeat, 'newRound', { first8: seatArrToMap(first8), rest6: seatArrToMap(rest6) });
     }));
     wrap.appendChild(again);
+    const note = dealingNote();
+    if (note) wrap.appendChild(note);
 
     const menuBtn = document.createElement('button');
     menuBtn.className = 'secondary';

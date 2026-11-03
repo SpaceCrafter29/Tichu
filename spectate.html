@@ -94,8 +94,12 @@ function render() {
     }
   }
   const rounds = [[]];
+  let lastDealSlot = -1;
   for (const ev of events) {
     if (ev.type === 'newRound') { rounds.push([]); continue; }
+    // Fair ausgeteilt (engine/fairdeal.js): der erste Beitrag einer neuen Austeilung beginnt die nächste Runde
+    if (ev.type === 'dealCommit' && ev.payload && ev.payload.slot > lastDealSlot) { lastDealSlot = ev.payload.slot; if (ev.payload.slot > 0) rounds.push([]); continue; }
+    if (ev.type === 'dealCommit' || ev.type === 'dealReveal') continue;
     const text = describe(ev);
     if (text) rounds[rounds.length - 1].push(text);
   }

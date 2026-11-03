@@ -109,9 +109,9 @@
     cardFreeplay.setAttribute('aria-disabled', 'true');
     cardTournament.setAttribute('aria-disabled', 'true');
     document.getElementById('room-name').textContent = latestGame.name ? `Tisch ${latestGame.name}` : 'Dein Tisch';
-    const labels = { waiting: 'Warte auf Mitspieler…', dealt: 'Karten ausgeteilt.', playing: 'Spiel läuft.', finished: 'Spiel beendet.' };
+    const labels = { waiting: 'Warte auf Mitspieler…', dealt: 'Alle da - Spielbrett öffnen, dort werden die Karten fair gemischt.', playing: 'Spiel läuft.', finished: 'Spiel beendet.' };
     let text = labels[latestGame.status] || latestGame.status;
-    if (latestSeat && latestSeat.hand) text += ` Deine Hand: ${latestSeat.hand.length} Karten.`;
+    if (latestSeat && latestSeat.hand && latestSeat.hand.length) text += ` Deine Hand: ${latestSeat.hand.length} Karten.`;
     document.getElementById('room-status').textContent = text;
     const seatsEl = document.getElementById('room-seats');
     seatsEl.innerHTML = '';

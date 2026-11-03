@@ -77,8 +77,8 @@ import {
 } from './lib/tournamentAuth.js';
 import {
   genPassword, watchPlayers, watchSchedules, watchTournamentGames, saveSchedule,
-  joinAssignedSeat, computeStandings, adminChangeSeats, adminSetResult, adminResetTable,
-} from './lib/tournament.js?v=20261010c';
+  joinAssignedSeat, computeStandings, adminChangeSeats, adminSetResult, adminResetTable, adminEnableFairDeal,
+} from './lib/tournament.js?v=20261103a';
 
 function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function shuffled(a) { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
@@ -340,6 +340,10 @@ const A = {
     planMsg = ''; render();
   },
   cancelEdit: () => { editSeats = null; render(); },
+  enableFair: async (gameId) => {
+    try { await adminEnableFairDeal(gameId); planMsg = 'Gespeichert – dieser Tisch teilt jetzt fair aus.'; } catch (e) { planMsg = 'Fehler: ' + (e.message || e); }
+    render();
+  },
   resetTable: async (gameId) => {
     const score = resetPrompt === gameId ? resetScore : null;
     if (!confirm('Tisch wirklich zurücksetzen? Alle werden ausgetragen, die Hände und bisherigen Züge werden gelöscht.' + (score ? ` Der Tisch startet mit dem Stand Team A ${score[0]} : ${score[1]} Team B.` : ' Der Punktestand beginnt wieder bei 0:0.'))) return;
@@ -475,6 +479,7 @@ function planView() {
         : `<p class="muted" style="margin:0;font-size:14px">Gesperrt - wird freigegeben, sobald ${esc((g.sourceGameIds || []).map(tableLabel).join(' und '))} entschieden sind.</p>`}
  ${g.status !== 'finished' ? `<button class="sm danger" data-act="resetTable" data-a="${esc(g.id)}">Tisch zurücksetzen</button>` : ''}
       ${editable ? `<button class="sm" data-act="editTable" data-a="${esc(g.id)}">Sitze ändern</button>` : ''}
+      ${g.status === 'waiting' && !g.fairDeal ? `<button class="sm" data-act="enableFair" data-a="${esc(g.id)}" title="Alle vier würfeln beim Austeilen mit - niemand kann die Karten allein bestimmen">Faires Austeilen einschalten</button>` : ''}
       ${g.seatUids && g.status !== 'finished' ? (resultEdit && resultEdit.gameId === g.id
         ? `<div class="stack" style="gap:8px;border-top:1px solid var(--line);padding-top:10px"><span class="small muted">Team A = Sitz 1+3 (${esc([0, 2].map((i) => usernameOf(g.seatUids[i])).join(' + '))}) · Team B = Sitz 2+4 (${esc([1, 3].map((i) => usernameOf(g.seatUids[i])).join(' + '))})</span>
             <div class="grid2"><div class="field"><label>Punkte Team A</label><input type="number" inputmode="numeric" data-resa value="${esc(resultEdit.a)}"></div>
@@ -613,8 +618,8 @@ function mineView() {
         <p class="small muted" style="margin:0">Ergebnis gespeichert - steht schon in der Tabelle.</p>
         <a href="spectate.html?g=${esc(g.id)}" style="color:var(--accent)">Spiel ansehen (Link zum Teilen)</a></section>`;
     } else {
-      body = `<section class="panel stack" style="gap:16px"><h2 style="font-size:20px">Karten sind ausgeteilt</h2>
-        <p class="muted" style="margin:0">Alle vier da - das Match läuft im Spielbrett.</p>
+      body = `<section class="panel stack" style="gap:16px"><h2 style="font-size:20px">Alle vier sind da</h2>
+        <p class="muted" style="margin:0">Das Match läuft im Spielbrett. Dort würfeln alle vier gemeinsam - die Karten werden fair gemischt, niemand kann sie allein bestimmen.</p>
         <button class="primary" data-act="goBoard" data-a="${esc(g.id)}">Zum Spielbrett</button></section>`;
     }
   }

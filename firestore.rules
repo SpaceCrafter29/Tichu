@@ -27,6 +27,16 @@ service cloud.firestore {
           && get(/databases/$(database)/documents/games/$(gameId)/private/seat3).data.claimedByUid == request.auth.uid);
     }
 
+    // Ein Ereignis darf nur für den EIGENEN Sitz angelegt werden: seatIndex muss ein Sitz sein, den dieser
+    // Account belegt. Sonst könnte ein manipulierter Browser Züge und Beiträge im Namen anderer Sitze
+    // posten - u. a. alle vier Beiträge des fairen Austeilens (engine/fairdeal.js) und so die Karten
+    // allein bestimmen. Nebenbei ein einziges get() statt der bis zu vier exists()/get() von
+    // isParticipant() je Ereignis - das spart Lesezugriffe (und damit Kosten).
+    function isOwnSeatEvent(gameId) {
+      return request.resource.data.seatIndex in [0, 1, 2, 3]
+        && get(/databases/$(database)/documents/games/$(gameId)/private/$('seat' + string(request.resource.data.seatIndex))).data.claimedByUid == request.auth.uid;
+    }
+
     // Eigenes Profil (Anzeigename etc.) - ausschließlich für den Besitzer sichtbar.
     // Innerhalb eines laufenden Spiels wird dieser Name NICHT angezeigt (siehe games/*).
     match /users/{uid} {
@@ -221,7 +231,7 @@ service cloud.firestore {
       // Ereignis-Log der gespielten Züge (einmal gespielte Karten sind ohnehin öffentlich).
       match /events/{eventId} {
         allow read: if signedIn();
-        allow create: if signedIn() && isParticipant(gameId);
+        allow create: if signedIn() && isOwnSeatEvent(gameId);
         allow update: if false;
         // Löschen: normalerweise nie (Ereignisse sind ein unveränderliches Log). Ausnahme: das
         // komplette Log eines schon leeren, wartenden Tisches darf geräumt werden (siehe
