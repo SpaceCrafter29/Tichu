@@ -37,5 +37,5 @@ unverändert weiter. Damit niemand im Namen anderer Sitze Beiträge posten kann,
 Hund, Phönix und Drache liegen als einzelne SVG-Dateien in `icons/` (`dog.svg`, `phoenix.svg`, `dragon.svg`,
 `viewBox="0 0 64 64"`, flache Farben: dunkel `#8A5A16`, mittel `#b8862f`, Kartenfarbe `#e8c471`). Wer ein Symbol
 ersetzen will, überschreibt die Datei und führt `node tools/embed-icons.mjs` aus - das Skript trägt sie in
-`board.html` und `play.html` ein. Der Drache ist aus einer Handskizze vektorisiert (Umriss, helle Mähne/Hals,
-Gravurlinien).
+`board.html` und `play.html` ein. Phönix- und Drachenkopf sind Zeichnungen (Raster) in den Spielfarben, die
+vektorisiert wurden: dunkel und mittel als Flächen, die hellen Linien sind echte Aussparungen.
